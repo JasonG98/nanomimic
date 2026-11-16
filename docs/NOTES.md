@@ -3,6 +3,34 @@
 记录实测数据、与参考仓库（HybridRobotics/supermimic）的差异、以及等待用户确认的事项。
 按任务追加，最新内容放在最前面。
 
+## 2026-11-16 · T4 传感器与回放缓冲
+
+- 实现 `synth_proprio`、统一的 `add_noise`、`HistoryRing` 与每环境环形回放。
+  合成传感器显式传入默认关节姿态，以保持关节位置为相对值且不依赖全局状态。
+- 历史为帧主序、最旧在前；重置行填充同一次噪声采样的整帧。
+  小历史使用函数式张量更新，避免原地覆盖想象反向传播仍需读取的数据。
+- 槽 t 保存 s_t、带噪 sensor_t、a_t 与该动作产生的 done_t；L 帧窗口仅检查
+  前 L−1 条连接无 done，最后一槽可为 done。T6 将采样 horizon+1 帧以取得
+  horizon 个合法监督后继，自动重置状态不会被当作旧回合后继。
+- `sample_start` 返回包含当前帧的 H 帧历史、对应动作和布尔掩码；False 表示
+  首帧填充，True 表示真实数据。窗口不足或已被环形覆盖时，以当前最早可用的
+  同回合观测填充并标 False，不读取已经覆盖的历史。起点上一动作从 sensor
+  尾部读取，不能把该槽尚未发出的 action 当成上一动作。
+- 采样先均衡覆盖有合法窗口的环境，再在各环境合法窗口内均匀抽样；合法性用
+  done 累加和计算，历史边界用累积最大值计算，没有逐环境 Python 采样循环。
+- CPU 验收覆盖噪声半宽、动作通道无噪声、历史梯度、部分行重置、terminated /
+  truncated、环境分层、容量覆盖、H=1、空缓冲与无合法窗口的环境。
+- ruff、格式检查（23 文件）、pyright（0 errors）、pytest（34 passed）通过。
+  默认缓冲保持每环境 1000 步；现有夹具未改动，无 SPEC 偏离。
+
+```bash
+uv run pytest tests/test_sensor_buffer.py
+uv run ruff check .
+uv run ruff format --check .
+uv run pyright
+uv run pytest
+```
+
 ## 2026-11-16 · T3 可微世界模型
 
 - 实现纯张量表示、半隐式积分、状态重建、FK、损失分组与 Dynamics。
