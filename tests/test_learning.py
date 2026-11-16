@@ -113,14 +113,17 @@ def test_compiled_world_model_matches_eager(robot: RobotSpec) -> None:
         torch.testing.assert_close(a.grad, b.grad, atol=1e-6, rtol=1e-5)
 
 
-def test_policy_compile_and_frozen_dynamics(robot: RobotSpec, motion: Motion) -> None:
+@pytest.mark.parametrize("horizon", [2, 4])
+def test_policy_compile_and_frozen_dynamics(robot: RobotSpec, motion: Motion, horizon: int) -> None:
     gradients = []
     for compiled in (False, True):
         torch.manual_seed(15)
         dynamics = Dynamics(robot, 33, DynamicsConfig((8, 8)))
         actor = Actor(29, ActorConfig(hidden=(8, 8)))
         critic = Critic(29, 33, CriticConfig((8, 8)))
-        cfg = TrainConfig(compile=compiled, compile_backend="aot_eager", policy=PolicyTrainConfig(batch=2, horizon=2))
+        cfg = TrainConfig(
+            compile=compiled, compile_backend="aot_eager", policy=PolicyTrainConfig(batch=2, horizon=horizon)
+        )
         improver = PolicyImprover(dynamics, actor, critic, motion, robot, cfg)
         batch = synthetic_batch(robot, batch=2, horizon=2)
         buffer = ReplayBuffer(2, 8)

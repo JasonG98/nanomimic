@@ -13,7 +13,7 @@ from nanomimic.common.specs import Motion, RobotSpec
 from nanomimic.models.model import Dynamics, aux_state, bryson_weights, loss_groups, represent
 from nanomimic.models.policy import Actor, Critic
 from nanomimic.rollout.buffer import ReplayBatch, ReplayBuffer
-from nanomimic.rollout.imagine import ImagineConfig, Rollout, discounted_return, imagine
+from nanomimic.rollout.imagine import ImagineConfig, Rollout, discounted_return, imagine, imagine_step
 from nanomimic.training.config import TrainConfig
 from nanomimic.training.optim import Optimizers, frozen_parameters
 
@@ -94,16 +94,20 @@ class PolicyImprover:
         self.cfg, self.dt = cfg.policy, robot.dt
         self.actor_optim = Optimizers(actor, self.cfg.lr, self.cfg.beta2)
         self.critic_optim = Optimizers(critic, self.cfg.lr, self.cfg.beta2)
-        rollout = partial(
+        imagine_cfg = ImagineConfig(robot, self.cfg.checkpoint, self.cfg.exploration_noise)
+        step = partial(imagine_step, dynamics, actor, critic, motion, imagine_cfg)
+        # 只编译重复的 rollout 单步，避免把全部时间步和 FK 展开成巨图。
+        step = torch.compile(step, backend=cfg.compile_backend) if cfg.compile else step
+        self.rollout = partial(
             imagine,
             dynamics,
             actor,
             critic,
             motion,
             horizon=self.cfg.horizon,
-            cfg=ImagineConfig(robot, self.cfg.checkpoint, self.cfg.exploration_noise),
+            cfg=imagine_cfg,
+            step=step,
         )
-        self.rollout = torch.compile(rollout, backend=cfg.compile_backend) if cfg.compile else rollout
         self.actor_loss = torch.compile(_actor_loss, backend=cfg.compile_backend) if cfg.compile else _actor_loss
         loss = partial(_critic_loss, critic)
         self.critic_loss = torch.compile(loss, backend=cfg.compile_backend) if cfg.compile else loss

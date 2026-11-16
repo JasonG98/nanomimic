@@ -4,6 +4,7 @@
 不改写输入、网络参数或归一化统计量；终止概率保留梯度。
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from functools import partial
 
@@ -104,7 +105,7 @@ class Rollout:
     terminal: Tensor  # [B, D]
 
 
-def _step(
+def imagine_step(
     dynamics: Dynamics,
     actor: Actor,
     critic: Critic,
@@ -117,6 +118,7 @@ def _step(
     previous: Tensor,
     ctx: Tensor,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
+    """从显式状态推进一控制步，返回带梯度的状态、计分与观测。"""
     goal = actor_goal(wm_goal(motion, aux, time))
     observation = critic.observation(state, goal, ctx)
     action = actor(history, goal)
@@ -141,6 +143,7 @@ def imagine(
     start: StartBatch,
     horizon: int,
     cfg: ImagineConfig,
+    step: Callable[..., tuple[Tensor, ...]] | None = None,
 ) -> Rollout:
     if horizon < 1:
         raise ValueError("想象步数必须大于零")
@@ -148,7 +151,8 @@ def imagine(
     time, history = start.motion_time, start.sensor
     previous = history[:, -1, -len(cfg.robot.joint_names) :]
     rewards, probabilities, observations = [], [], []
-    step = partial(_step, dynamics, actor, critic, motion, cfg)
+    # 训练侧可传入单独编译的单步；Python 时间循环保持完整梯度链。
+    step = partial(imagine_step, dynamics, actor, critic, motion, cfg) if step is None else step
     for _ in range(horizon):
         args = (state, aux, time, history, previous, start.ctx)
         result = checkpoint(step, *args, use_reentrant=False) if cfg.checkpoint else step(*args)
