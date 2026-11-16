@@ -3,6 +3,168 @@
 记录实测数据、与参考仓库（HybridRobotics/supermimic）的差异、以及等待用户确认的事项。
 按任务追加，最新内容放在最前面。
 
+## 2026-11-16 · T8、T9 推进安排（本次用户明确授权）
+
+- T6 的实现与 CPU 验证之后，先连续完成 T8 的实现与 CPU 数值验收，再完成
+  T9 的实现与 Mac CPU 回放实测，不等待 GPU。已同步 SPEC，保留所有原验收标准。
+- T1、T6 GPU 部分、T7、T8 最终 sim2sim 继续待用户在 RTX 5060 Ti 上运行；
+  最终 sim2sim 等 T7 得到合格策略后执行。试跑检查点仅验证功能，不代表训练效果。
+- 已找到 `runs/mac-cpu/00000050` 和 `runs/mac-cpu-resume/00000100`：
+  CPU、两环境、小网络、H=3，无需重新训练。沿用五目录结构，参考仓库只读。
+- 本次 Git 提交与推送未授权，不执行。
+
+### T8 实现与 CPU 数值实测
+
+- 接通 `export --verify`；输入 `obs` 为 fp32 `[1, H×93+640]`，
+  `time_step` 为 fp32 `[1, 1]`，图内转整数索引。历史每个 term 内最旧在前，
+  目标为 580 维关节窗口加 60 维相对朝向，不含 30 维相对位置。
+- 沿用参考 motion 部署图的输出名 `actions`，其余六项为 SPEC 指定的动作张量。
+  ONNX 内嵌全部六个动作库常量，跟踪 body 顺序与 `body_names` 一致；固定批量 1、
+  opset 18、无外部数据文件，拒绝超过 15000 帧的动作库。
+- 时间上界沿用参考的全动作库末帧；额外把负时间钳到 0，避免负索引意外取末帧。
+  这不改变有效时间的契约；目标窗口仍由既有实现按所属 clip 末帧钳位。
+- 发布版 mjlab 的元数据函数仅在 `runtime/sim.py` 调用，维持导入隔离；
+  补齐 anchor、body、两个目标 term 与历史长度，同时扩展 scale/clip 等逐 term
+  数组，使其与七个观测 term 一一对应。参考导出器只扩展名称和一组历史长度。
+- 使用已安装 torch 2.15 的公开 `torch.onnx.export(dynamo=False)`，与参考导出
+  契约一致且不增加依赖。Context7 与本地发布版源码均已核对；该路径有第三方
+  弃用警告，当前导出及 ONNX Runtime CPU 推理均可用。
+- 100 次试跑检查点：96 帧，43 组随机历史/目标及边界时间的 CPU 自检通过；
+  最大动作绝对误差 **5.36442e-7 < 1e-4**，六个动作库输出逐元素严格相等。
+  新增 7 项测试通过；T8 阶段完整 pytest **54 passed（26.19 秒）**，
+  ruff、格式检查与 pyright（0 errors）通过。
+
+```bash
+uv run nanomimic export --checkpoint runs/mac-cpu-resume/00000100 \
+  --out outputs/mac-cpu/policy.onnx --verify
+uv run pytest tests/test_export.py
+```
+
+### T9 实现与 Mac CPU 实测
+
+- 接通 `play --viewer native|viser`，默认一个真实环境；只对 env 0 维护
+  一条预测状态、动作时间、随机化上下文和历史。真实侧与预测侧独立计算目标、
+  调用 Actor，动力学使用预测侧动作，没有把真实动作回灌成开环预测。
+- 两侧统一通过既有 `add_noise` 加传感器噪声；不加训练时的动作探索噪声，
+  不更新网络与归一化。虚影使用同一控制步长与 clip 末帧钳位。
+- 回合结束时对齐返回的新回合状态；定期对齐只重置预测历史，保留真实侧历史。
+  上一动作取真实观测的对应通道。其他环境 done 不会重置 env 0 的虚影。
+  也处理 viewer 重置及 Viser 动作控件绕过 viewer 的底层重置。
+- 默认 `num_steps_rollout=1000000` 取自参考 `scripts/play.py`，没有替换成
+  训练想象 horizon。实测显式设为 5 或 10，便于在短运行里观察对齐。
+- 两种查看器各一个薄子类，单步共享 `GhostRollout`，使用发布版公开的
+  `add_ghost_mesh(qpos, model, alpha, label)`，无需参考仓库私有 ghost 接口。
+  qpos 按发布版实体的地址映射写入，根位置补 env 0 世界偏移；模型为独立副本，
+  `geom_rgba=[0.5, 0.5, 0.8, 0.8]`，不改变真实仿真模型。
+- 发布版 native ghost 默认启用 `mjVIS_TRANSPARENT`，最终 alpha 还乘
+  `model.vis.map.alpha`（默认 0.3），因此渲染 alpha 为 0.24；模型 RGBA 仍为规格值。
+  Context7 与本地发布版源码核对后，绘制测试按此契约检查，误差阈值仍为 1e-7。
+- macOS 原生入口自动经 `mjpython` 重启；uv 的 venv 解释器为符号链接，
+  需把 `sys.base_prefix/lib` 加入启动进程的动态库查找路径。首次遇到的
+  libpython 加载失败已修复，并实际验证 CLI 启动。GUI/本机端口实测需要在
+  agent 沙箱外运行；普通终端直接使用下面的命令即可。
+- 100 次试跑检查点、Mac CPU：native 与 viser 各 **120 步**，均为回合对齐
+  **3 次**、定期对齐 **21 次**。native 延长到 **2000 步**，回合对齐 **49 次**、
+  定期对齐 **170 次**，没有回放异常或非有限虚影。
+- 收尾定位到 macOS native 的退出边界：发生回合重置后，Python 已打印结束且查看器
+  和仿真已关闭，mjpython 仍可能停在 Cocoa 原生退出阶段。基础 mjpython、只导入
+  PyTorch/MuJoCo/viewer 的对照均可退出；无回合重置的两步与含重置的 120 步形成复现。
+  因此仅在 macOS native **成功完成有限步**回放后调用 `os._exit(0)`，默认交互回放
+  不改。修复后含 **3 次**回合对齐的 120 步及 **2000 步**进程均实测以退出码 **0**
+  正常结束；2000 步仍为回合对齐 **49 次**、定期对齐 **170 次**。
+- Viser 浏览器实际观察到绿色参考虚影、紫色世界模型虚影和真实机器人，
+  验证暂停、单步（步数 0→1）、Reset Environment 后虚影立即对齐。
+  该次总计 **646 步**，回合对齐 **15 次**、周期对齐 **55 次**，最后 Ctrl+C 关闭。
+  对齐画面保存在 `outputs/mac-cpu/viser-aligned.jpg`，产物按既有规则不入 Git。
+  原生窗口已实际运行；计算机使用工具连接原生窗口超时，未取得其截图。
+- 试跑策略仍会摔倒、自动重置；较长回放出现发布版 Warp 的 broadphase
+  接触容量提示（建议 nconmax/naconmax 36–39）。本轮未改仿真接触容量或训练
+  默认值；上述实测只证明回放、虚影和对齐功能，不构成物理精度或训练效果验收。
+- 新增 6 项回放测试：独立预测输入和动作、周期对齐、其他环境 done 隔离、
+  回合及手动重置、真实 MuJoCo 场景绘制与模型隔离、CLI 和非法配置。
+  README 已补齐安装、GPU/CPU 训练、续训、导出契约、回放与交互说明。
+- 参考仓库未修改；其工作区已有未跟踪的 `.DS_Store`，本轮未处理该文件。
+
+```bash
+uv run nanomimic play --checkpoint runs/mac-cpu-resume/00000100 \
+  --viewer native --device cpu --num-steps-rollout 5 --num-steps 120
+uv run nanomimic play --checkpoint runs/mac-cpu-resume/00000100 \
+  --viewer viser --device cpu --num-steps-rollout 5 --num-steps 120
+uv run pytest tests/test_export.py tests/test_viewer.py
+```
+
+### 本轮检查与尚未完成的验收
+
+- T8 阶段 54 项完整测试通过；T9 新增测试后完整 pytest **60 passed
+  （31.53 秒）**，ruff、格式检查（42 文件）与 pyright（0 errors）通过。
+  第三方警告限于已记录的 torch.jit.script 与旧 ONNX 导出 API 弃用提示。
+- 保留五目录组织，只新增规格要求的两个 runtime 实现及对应测试；最大源码
+  文件为 `runtime/sim.py`（294 行）。既有夹具和数值误差阈值未修改。
+- 无 NVIDIA GPU，未运行 T1、T6 GPU、T7 或最终 sim2sim，未验证显存低于 15GB。
+  T8/T9 的实现与 CPU 验证已完成；Git 提交与推送等用户另行授权。
+- T1 和 T6 GPU 继续使用下方 T6/T2 记录的命令，状态为
+  **待用户在 RTX 5060 Ti 上运行**；默认 num_envs=2048 不变。
+- T7：待用户在 RTX 5060 Ti 上运行。准备真实动作文件到下面路径后训练；
+  收敛后与参考实现对比成功率和平均跟踪误差，阈值仍须由用户确认。
+
+```bash
+uv run nanomimic train --motion-file data/lafan_run1_subject5.npz \
+  --device cuda:0 --output runs/t7
+```
+
+T8 最终 sim2sim：**待用户在 RTX 5060 Ti 上运行，且须先得到 T7 合格策略**。
+下列命令以 T7 默认最终检查点为例，ONNX Runtime 在 CPU 推理，物理环境在 GPU；
+从每段动作首帧连续跟踪到末帧，任何 terminated/truncated 都判失败。
+只延长验收回合时间以覆盖完整动作，不关闭摔倒终止。此命令本轮未执行，
+不以 100 次 CPU 试跑策略代替合格策略。
+
+```bash
+uv run nanomimic export --checkpoint runs/t7/01000000 \
+  --out outputs/t7.onnx --verify
+uv run python - <<'PY'
+from pathlib import Path
+import numpy as np
+import onnxruntime as ort
+import torch
+from nanomimic.common.specs import SimConfig
+from nanomimic.rollout.imagine import actor_goal
+from nanomimic.rollout.sensor import HistoryRing, add_noise
+from nanomimic.runtime.export import deployment_obs
+from nanomimic.runtime.sim import Sim
+from nanomimic.training.config import load_config
+
+cfg = load_config(Path("runs/t7/01000000"))
+assert cfg.motion_file is not None
+session = ort.InferenceSession("outputs/t7.onnx", providers=["CPUExecutionProvider"])
+with Sim(SimConfig(cfg.motion_file, num_envs=1, device="cuda:0", seed=cfg.seed)) as sim:
+    env = sim._env
+    env.cfg.episode_length_s = (sim.motion.num_frames + 1) * sim.robot.dt
+    start = 0
+    for clip, end in enumerate(sim.motion.clip_ends.tolist()):
+        sim.reset()
+        sim._command.reset_to_frame(torch.tensor([0], device=sim.device), start)
+        env.scene.write_data_to_sim()
+        env.sim.forward()
+        env.sim.sense()
+        sim._command.update_relative_body_poses()
+        obs = sim._snapshot(env.observation_manager.compute(update_history=True))
+        history = HistoryRing(cfg.actor.history_length)
+        history.push(add_noise(obs.sensor))
+        for frame in range(start, end + 1):
+            assert sim.motion_time.item() == frame, "动作时间未连续推进"
+            packed = deployment_obs(history.window(), actor_goal(obs.goal)).cpu().numpy()
+            action = session.run(["actions"], {
+                "obs": packed,
+                "time_step": np.array([[frame]], dtype=np.float32),
+            })[0]
+            obs, _, terminated, truncated = sim.step(torch.as_tensor(action, device=sim.device))
+            assert not (terminated | truncated).any(), f"第 {clip} 段第 {frame} 帧失败"
+            history.push(add_noise(obs.sensor))
+        print(f"第 {clip} 段完整跟踪通过，共 {end - start + 1} 帧")
+        start = end + 1
+PY
+```
+
 ## 2026-11-16 · 按职责整理目录（用户确认的方案二）
 
 ### 结构与合并

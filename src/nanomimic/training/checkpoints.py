@@ -15,6 +15,18 @@ from nanomimic.training.config import TrainConfig, config_dict
 from nanomimic.training.optim import Optimizers
 
 
+def load_weights(directory: Path, name: str, model: nn.Module, device: torch.device) -> int:
+    """推理只读取权重与归一化，不恢复优化器或全局 RNG；返回迭代号。"""
+    payload = torch.load(directory / f"{name}.pt", map_location=device, weights_only=True)
+    if payload.get("schema_version") != 1 or not isinstance(payload.get("iteration"), int):
+        raise ValueError(f"{name} 检查点的版本或迭代号无效")
+    if not all(torch.isfinite(value).all() for value in payload["model"].values()):
+        raise ValueError(f"{name} 检查点含非有限参数或归一化统计量")
+    model.load_state_dict(payload["model"])
+    model.eval()
+    return payload["iteration"]
+
+
 def save_checkpoint(
     directory: Path, cfg: TrainConfig, models: dict[str, tuple[nn.Module, Optimizers]], progress: dict[str, int | float]
 ) -> None:

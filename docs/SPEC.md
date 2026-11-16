@@ -9,7 +9,9 @@
 1. 参考仓库 HybridRobotics/supermimic **只读**：只用来取常量、生成对拍夹具、核对 mjlab 契约。不要复制它的文件结构、类层次或代码。本规格与参考仓库冲突时以本规格为准，并在 docs/NOTES.md 记一条。
 2. 规格没写清的细节：先看各节「参考」指向的文件；仍不确定就选最简方案并记入 docs/NOTES.md，不要自行增加功能。
 3. 不要实现：MaxCoord 与 IK、velocity 任务与 latent BC、多任务、ReturnSampler、手写 CUDA graph、benchmark、W&B 产物与动作库注册表、PPO、真机运行时。
-4. 按第 5 节的顺序做任务，每个任务通过验收后再做下一个，每个任务一个提交。
+4. 按第 5 节的顺序做任务，每个任务通过验收后再做下一个，每个任务一个提交，提交需当次授权。
+   2026-11-16 用户明确授权：T6 的 CPU 验证后，先连续完成 T8、T9 的实现与 CPU 验证，
+   不等待 GPU；之后补 T1、T6 GPU、T7 和 T8 最终 sim2sim，原验收标准不变。
 
 ## 1. 技术栈与规范
 
@@ -44,8 +46,8 @@ nanomimic/
 │  ├─ runtime/
 │  │  ├─ sim.py           mjlab 适配
 │  │  ├─ motion.py        本地 NPZ 动作文件校验
-│  │  ├─ export.py        ONNX 导出与自检（T8 待实现）
-│  │  └─ viewer.py        世界模型虚影（T9 待实现）
+│  │  ├─ export.py        ONNX 导出与 CPU 一致性自检
+│  │  └─ viewer.py        回放与世界模型闭环虚影
 │  └─ cli.py              train / play / export
 ├─ tests/          CPU 可跑的单测；tests/fixtures/ 存对拍夹具
 ├─ tools/          make_fixtures.py：在装有参考仓库的环境里生成夹具
@@ -151,19 +153,28 @@ J 为关节数（G1 是 29），动作维度 A = J，E 为并行环境数。
 - 导出 motion 契约的 ONNX，沿用 mjlab 跟踪任务的部署契约：输入 (obs, time_step)，输出 (action, joint_pos, joint_vel, body_pos_w, body_quat_w, body_lin_vel_w, body_ang_vel_w)。
 - 动作库张量作为常量 buffer 嵌进图里，time_step 钳在末帧；obs 先在图内从 term 主序转成帧主序再喂 Actor。obs 布局与元数据以参考仓库 runners/exporter.py 的 motion 部分为准，差异记入 docs/NOTES.md。
 - 元数据：mjlab 的 get_base_metadata 与 attach_metadata_to_onnx，另加 anchor_body_name、body_names、observation_names、observation_history_lengths。
-- 仅当动作库不超过 15000 帧时导出。export --verify 执行自检。
+- 仅当动作库不超过 15000 帧时导出。export --verify 执行 CPU 数值一致性自检；
+  第 6 节的完整动作闭环且不摔倒的 sim2sim，待 T7 得到合格策略后单独验收。
 
 ### 4.9 runtime/viewer.py
 
 - GhostRollout 只对 env 0 维护一条世界模型闭环预测。每步：真实侧，Actor 吃真实 sensor 与 goal，再 env.step；世界模型侧，用预测状态合成 sensor（带噪声）与 wm_goal，Actor 出动作，dynamics 推进；再用 reconstruct_full_state 取根位姿与关节位置，拼成 qpos 画虚影。
-- 重新对齐：回合结束或每 num_steps_rollout 步，用真实状态重置预测状态与历史（默认值取参考仓库）。
+- 重新对齐：回合结束或每 num_steps_rollout 步，用真实状态重置预测状态与历史
+  （参考回放配置默认 1000000 步，可通过 play --num-steps-rollout 覆盖）。
 - 渲染：复制一份 MuJoCo 模型，geom 颜色设为 [0.5, 0.5, 0.8, 0.8]，用 mjlab viewer 的 ghost 接口叠加。原生窗口与 viser 窗口各一个薄子类，只改单步与可视化回调。参考：scripts/viewers.py。
 
 ### 4.10 cli.py
 
 train；play --checkpoint [--viewer native|viser]；export --checkpoint --out [--verify]。
+play 可用 --device 指定设备、--num-steps 指定有限回放步数；默认使用一个环境，
+有 CUDA 则用 cuda:0，否则 CPU。macOS 原生入口自动经 mjpython 启动。
 
 ## 5. 开发任务
+
+当前推进安排：T0、T2–T5 已完成，T6 实现与 CPU 验证已通过；本轮先做 T8 的实现与
+CPU 数值验收，再做 T9 的实现与 Mac CPU 实测。T1、T6 GPU 部分、T7 和 T8 完整动作
+闭环且不摔倒的 sim2sim 仍待完成；T8 最终 sim2sim 须使用 T7 得到的合格策略。
+CPU 试跑检查点仅验证导出和回放功能，不代替训练效果验收。
 
 | 任务 | 内容 | 验收 |
 |---|---|---|

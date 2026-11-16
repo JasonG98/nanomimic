@@ -1,16 +1,17 @@
 """命令行入口：train / play / export 三个子命令。
 
 训练支持本地动作与断点恢复，参数由 frozen dataclass 经 tyro 暴露。
-回放与导出的实际逻辑分别留给 T9、T8 接入本文件。
+回放与导出分别由 runtime/viewer.py 和 runtime/export.py 执行。
 """
 
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from dataclasses import dataclass, fields
 from pathlib import Path
-from typing import Annotated, Literal, NoReturn
+from typing import Annotated, Literal
 
 import tyro
 
@@ -32,10 +33,13 @@ class PlayCmd:
 
 @dataclass(frozen=True)
 class ExportCmd:
-    """把 Actor 与动作库导出为 ONNX（T8 接入）。"""
+    """把 Actor 与动作库导出为 ONNX，可执行 CPU 数值一致性自检。"""
 
+    # 含 config.json 与 actor.pt 的检查点目录。
     checkpoint: Path
+    # 单文件 ONNX 的输出路径。
     out: Path
+    # 对照 PyTorch Actor 与原始动作库执行 CPU 数值自检。
     verify: bool = False
 
 
@@ -44,11 +48,6 @@ Command = (
     | Annotated[PlayCmd, tyro.conf.subcommand(name="play")]
     | Annotated[ExportCmd, tyro.conf.subcommand(name="export")]
 )
-
-
-def _pending(command: str, task: str) -> NoReturn:
-    """以非零状态退出，说明该子命令尚未实现。"""
-    raise SystemExit(f"nanomimic {command}: 尚未实现（计划在 {task} 接入）")
 
 
 def parse_command(arguments: list[str]) -> TrainCmd | PlayCmd | ExportCmd:
@@ -80,8 +79,13 @@ def main() -> None:
             raise SystemExit(f"训练失败：{error}") from error
         return
     if isinstance(command, PlayCmd):
-        _pending("play", "T9")
-    _pending("export", "T8")
+        raise SystemExit("nanomimic play: 尚未实现（计划在 T9 接入）")
+    from nanomimic.runtime.export import export
+
+    try:
+        export(command.checkpoint, command.out, command.verify)
+    except (ValueError, FileNotFoundError) as error:
+        raise SystemExit(f"导出失败：{error}") from error
 
 
 if __name__ == "__main__":

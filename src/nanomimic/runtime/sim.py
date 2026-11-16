@@ -15,6 +15,7 @@ from mjlab.envs import ManagerBasedRlEnv, ManagerBasedRlEnvCfg, mdp
 from mjlab.envs.mdp.actions import JointPositionAction
 from mjlab.managers import ObservationGroupCfg, ObservationTermCfg
 from mjlab.rl import RslRlBaseRunnerCfg
+from mjlab.rl.exporter_utils import attach_metadata_to_onnx, get_base_metadata
 from mjlab.tasks.registry import list_tasks, register_mjlab_task
 from mjlab.tasks.tracking.config.g1.env_cfgs import unitree_g1_flat_tracking_env_cfg
 from mjlab.tasks.tracking.mdp.commands import MotionCommand, MotionCommandCfg
@@ -263,6 +264,25 @@ class Sim:
             raise ValueError("action 必须全部为有限值")
         obs, reward, terminated, truncated, _ = self._env.step(action)
         return self._snapshot(obs), reward.clone(), terminated.clone(), truncated.clone()
+
+    def attach_export_metadata(self, path: Path, history_length: int, run_name: str) -> None:
+        """在 mjlab 边界附加部署元数据；目标不堆叠历史且不含相对位置。"""
+        metadata = get_base_metadata(self._env, run_name)
+        names = list(self._env.observation_manager.active_terms["actor"])
+        metadata.update(
+            anchor_body_name=self.robot.anchor_body_name,
+            body_names=list(self.robot.body_names),
+            observation_names=[*names, "command", "motion_anchor_ori_b"],
+            observation_history_lengths=[history_length] * len(names) + [1, 1],
+            observation_terms_history_length=[history_length] * len(names) + [1, 1],
+        )
+        for key, extra in (
+            ("observation_terms_scale", [1.0, 1.0]),
+            ("observation_terms_flatten_history_dim", [True, True]),
+            ("observation_terms_clip", [[float("-inf"), float("inf")]] * 2),
+        ):
+            metadata[key] = cast(list, metadata[key]) + extra
+        attach_metadata_to_onnx(str(path), metadata)
 
     def close(self) -> None:
         self._env.close()
