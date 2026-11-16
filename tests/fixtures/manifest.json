@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "seed": 20261116,
+  "reference_commit": "abc124c1bd5976341034668af3d12c087f2f1f55",
+  "versions": {
+    "torch": "2.15.0",
+    "mjlab": "1.6.1",
+    "mujoco": "3.11.0",
+    "numpy": "2.5.4"
+  },
+  "sources_sha256": {
+    "representations.py": "b863f79d32acd1486b9e03d0ff6a3f65cbc3bf353ef0d4688ef8dbb7d7c89869",
+    "tasks/env_cfgs.py": "55efacc59cf50f18ce93e557d38406f5ac9534465fc52b8c9d5eedd4b5781696",
+    "utils/gencoord_helpers.py": "35e6421b41f517cde75a1d339e79cf84e2577fd035a7b99d7477792ad7cd82a0",
+    "utils/helpers.py": "e15aacee141961e9b99fe669f394ae811b054a200bf665079f5953d5ebd0f78a",
+    "utils/tracking_reward.py": "2d092a8c1e2c091623731c18b21c8c339d060f71181e464ce8ac6c3640386ef9",
+    "envs/world_model_env.py": "359fcab19230c5448644a5a30e626767c0eb1a3078c57437f468cf953d627319",
+    "learners/wm_learner.py": "1e2d489a607677032d9d90de2511c2e8e1750bd845dcc7966026f23a65842665"
+  },
+  "fixture_sha256": {
+    "motion.npz": "c4030977382668861961dddc3879404d7bbc448417d2dae4b3d94d9b963f988d",
+    "reference.npz": "68320d47afa93f797884ef794a3041d527a435cd3a9504e329e557a7ffeb8c59"
+  },
+  "body_names": [
+    "pelvis",
+    "left_hip_roll_link",
+    "left_knee_link",
+    "left_ankle_roll_link",
+    "right_hip_roll_link",
+    "right_knee_link",
+    "right_ankle_roll_link",
+    "torso_link",
+    "left_shoulder_roll_link",
+    "left_elbow_link",
+    "left_wrist_yaw_link",
+    "right_shoulder_roll_link",
+    "right_elbow_link",
+    "right_wrist_yaw_link"
+  ],
+  "loss_group_names": [
+    "root_pos",
+    "root_ori",
+    "joint_pos",
+    "joint_vel"
+  ],
+  "integration_substep_coeff": 1.0,
+  "fk_oracle": "MuJoCo mj_forward + body 原点处的 mj_jac；发布版不含参考私有 fork 的 FK",
+  "motion_note": "96 帧合成动作，仅用于 CPU 契约验收，不是 lafan_run1_subject5"
+}

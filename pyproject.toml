@@ -66,7 +66,7 @@ ignore = ["RUF001", "RUF002", "RUF003"]
 docstring-code-format = true
 
 [tool.pyright]
-include = ["src", "tests"]
+include = ["src", "tests", "tools"]
 pythonVersion = "3.13"
 typeCheckingMode = "standard"
 

@@ -3,6 +3,114 @@
 记录实测数据、与参考仓库（HybridRobotics/supermimic）的差异、以及等待用户确认的事项。
 按任务追加，最新内容放在最前面。
 
+## 2026-11-16 · T2 仿真适配与对拍夹具
+
+### 状态与实测
+
+- 按用户本次要求，先做 M1 Pro 上可以验收的任务。T0 已有提交；T1 仍待 GPU
+  实测，本次推进 T2，不把 T1 记为完成，默认 `num_envs=2048` 暂不调整。
+- 实现 `Sim`、`Obs`、`RobotSpec`、`Motion`、`ContextSpec`，注册
+  `Nanomimic-Tracking-Flat-Unitree-G1`。配置为 frozen dataclass，
+  `tools/check_sim.py` 用 tyro 暴露 CPU/CUDA 验收参数。
+- 使用现有只读参考仓库 `../supermimic`，提交
+  `abc124c1bd5976341034668af3d12c087f2f1f55`；没有修改参考仓库，也没有安装其私有 mjlab fork。
+- 环境：Python 3.13.7、torch 2.15.0、mjlab 1.6.1、MuJoCo 3.11.0、Warp 1.19.0；
+  设备明确为 `cpu`，CUDA 不可用。
+- 独立验收命令跑通 **2 个环境 × 100 步随机动作**，共 3 次自动重置。
+  首次运行的步进部分（含契约检查）耗时 3.17 秒；此值不用于 GPU 性能推断。
+- 每步检查：状态 `[2, 71]`、目标 `[2, 670]`、传感器 `[2, 93]`、
+  上下文 `[2, 33]`，所有值有限，上下文在 `[-1, 1]` 内。
+- 机器人：29 关节、30 个运动树 body、14 个跟踪 body，锚点 `pelvis`，
+  控制步长 0.02 秒，软终止阈值分别为 0.25 与 0.8。
+- 最终检查：`ruff check`、`ruff format --check`（15 个文件）、`pyright`
+  （0 errors）与 `pytest`（23 passed，6.60 秒）通过。唯一警告来自 mjlab 导入时的
+  `torch.jit.script` 弃用提示，与 T0 已记录的问题相同。
+
+### 契约与决策
+
+1. **发布版接口**：通过 Context7 文档和本地 1.6.1 源码核对，重置模式名称确为
+   `adaptive`。发布版在整段动作结束时重采样、写入机器人状态；本项目在 `sim.py`
+   内用薄子类将推进改为片段末帧钳位，保留其 adaptive 采样与失败率更新。
+2. **片段端点**：NPZ 可选 `motion_ends` 沿用参考的右开端点；读入后转换成
+   `Motion.clip_ends` 的包含式末帧索引。未提供时是一段动作。文件必须包含完整
+   30 个机器人 body 的数据，之后选取 14 个跟踪 body；不接受缺字段、错误形状、
+   非有限值、非单位四元数或错误帧率。若存在 `fps`，必须为 50，不自动重采样。
+3. **传感器**：沿用参考的部署含义：关节位置是相对默认姿态的编码器读数，包含
+   固定的编码器偏置；基座角速度来自 IMU。这里的“干净”指未添加逐帧均匀噪声，
+   不移除域随机化偏置。噪声入口留给 T4 的 `sensor.py`。
+4. **上下文**：三个通道实际为 `1 + 3 + 29 = 33` 维，顺序是脚摩擦、质心偏移、
+   编码器偏置。摩擦读取实际全局 geom 索引；质心先减名义 `body_ipos`，再按
+   配置中的偏移范围归一化。参考实现直接归一化绝对 `body_ipos`，可能超出
+   `[-1, 1]`；本项目按 SPEC 的范围要求修正，不以 clamp 隐藏越界。
+5. **自动重置**：沿用 mjlab 的自动重置语义。`step()` 的 done 标志描述旧回合，
+   done 行返回的是新回合观测，上一动作清零；后续缓冲不能把它当成旧回合的后继。
+   返回观测、奖励、done 和动作时间均为快照，不会被下一步原地覆盖。
+6. **解耦**：dataclass 放在纯张量 `specs.py`，NPZ 校验放在 `motion.py`；
+   仿真器导入仍仅在 `sim.py`。FK 常量使用完整树的父节点、固定变换、关节轴、
+   铰链原点与 qpos0，后续 T3 不需要导入 mjlab 或 MuJoCo。
+7. **类型检查**：将工具脚本也纳入 pyright。MuJoCo 的公开 C 扩展动态导出缺失
+   可解析类型桩，仅在工具中对应的单行导入精确抑制 `reportAttributeAccessIssue`；
+   项目其他代码继续执行原有检查规则。
+
+### 夹具与验证范围
+
+- `tools/make_fixtures.py` 调用参考实现生成表示、积分、损失分组、Bryson 权重、
+  目标窗口、奖励和软终止真值；没有把参考代码复制进本项目。
+- 积分显式采用 SPEC 的 `substep_coeff=1.0`；参考工厂在 decimation=4 时采用
+  0.625。差异是执行已有规格，不是新增选择。
+- 发布版 mjlab 不含参考私有 fork 的 `ForwardKinematics`。FK 夹具由 MuJoCo
+  `mj_forward` 和 body 原点处的 `mj_jac` 独立计算，速度为世界系；不把质心速度
+  误当成 link 原点速度。夹具同时保存完整运动树常量供 T3 对拍。
+- 合成动作共 96 帧、两个片段，只用于接口验收；不代表 `lafan_run1_subject5`
+  的训练效果。`manifest.json` 记录种子、依赖版本、参考提交、源码及产物 SHA-256。
+  所有夹具均通过生成器生成，未手工编辑。
+- 在独立临时目录再次运行生成器，两个 NPZ 与 `manifest.json` 均逐字节一致。
+- 测试覆盖随机步进、自动重置、超时、注册配置隔离、返回值快照、实际随机化参数、
+  运动树常量、片段边界和错误输入。状态与目标观测对参考夹具使用 `atol=1e-5, rtol=0`。
+  mjlab 的 `get_observations()` 会返回缓存；测试写入状态后显式刷新观测管理器。
+- T3/T5 的数值实现与梯度验收尚未开始；当前只是为它们生成真值。
+- 用户已于 2026-11-16 明确授权提交 T2；提交前复跑 ruff、格式检查、pyright 与
+  pytest（23 passed）全部通过。
+
+复现命令（普通终端）：
+
+```bash
+uv run python tools/make_fixtures.py --reference ../supermimic
+uv run python tools/check_sim.py
+uv run ruff check .
+uv run ruff format --check .
+uv run pyright
+uv run pytest
+```
+
+受限 agent 会话中为上述命令设置可写缓存目录；普通终端不需要：
+
+```bash
+export UV_CACHE_DIR="$PWD/.uv-cache"
+export MPLCONFIGDIR=/private/tmp/nanomimic-mpl
+export XDG_CACHE_HOME=/private/tmp/nanomimic-cache
+export WARP_CACHE_PATH=/private/tmp/nanomimic-warp
+```
+
+### T1：待用户在 RTX 5060 Ti 上运行
+
+先核对 CUDA 构建，再分别运行两档环境数。下面使用同一份本地合成动作，输出的是
+含形状/有限性检查的环境步数/秒；不能和去掉检查的纯物理吞吐直接比较。
+另一个终端运行 `nvidia-smi` 采样显存，排除其他 GPU 进程后记录峰值。
+拿到两档实测数据前不确定最终默认环境数。
+
+```bash
+uv run python -c "import torch; print(torch.__version__, torch.version.cuda, torch.cuda.is_available())"
+nvidia-smi --query-gpu=timestamp,name,memory.used --format=csv -lms 200
+```
+
+```bash
+uv run python tools/check_sim.py --device cuda:0 --num-envs 2048 --steps 1000
+uv run python tools/check_sim.py --device cuda:0 --num-envs 4096 --steps 1000
+```
+
+GPU 命令本机未运行。T6、T7、T8 的 GPU 验收留到对应任务，不在 T2 宣称通过。
+
 ## 2026-11-15 · T0 脚手架
 
 ### 目录与环境
