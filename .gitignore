@@ -21,3 +21,6 @@ node_modules/
 .DS_Store
 .idea/
 .vscode/
+
+# 本地动作数据（体积大，用 tools/make_motion.py 重新生成）
+/data
