@@ -1,0 +1,75 @@
+[project]
+name = "nanomimic"
+version = "0.1.0"
+description = "用可微世界模型在想象中反向传播的人形全身动作跟踪训练管线"
+readme = "README.md"
+license = "Apache-2.0"
+authors = [{ name = "nanomimic contributors" }]
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "mjlab>=1.6.1,<2",
+    "onnx>=1.23",
+    "onnxruntime>=1.32",
+    "torch>=2.15,<2.16",
+    "tyro>=1.0.17",
+]
+
+[project.scripts]
+nanomimic = "nanomimic.cli:main"
+
+[dependency-groups]
+dev = ["pyright", "pytest", "ruff"]
+
+[build-system]
+requires = ["uv_build>=0.13.8,<0.14.0"]
+build-backend = "uv_build"
+
+[[tool.uv.index]]
+# 默认索引：清华 PyPI 镜像，国内下载快
+name = "tuna"
+url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple/"
+default = true
+
+[[tool.uv.index]]
+# PyTorch 官方 CUDA 13.2 wheel 源，仅通过 tool.uv.sources 显式引用
+name = "pytorch-cu132"
+url = "https://download.pytorch.org/whl/cu132"
+explicit = true
+
+[tool.uv.sources]
+# 仅 Linux 走 CUDA wheel（真机训练机）；macOS 仍取默认索引的 MPS/CPU 构建
+torch = [{ index = "pytorch-cu132", marker = "sys_platform == 'linux'" }]
+
+[tool.ruff]
+line-length = 120
+target-version = "py313"
+src = ["src", "tests", "tools"]
+extend-exclude = [".uv-cache", "tests/fixtures"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle：风格错误
+    "W",   # pycodestyle：风格警告
+    "F",   # Pyflakes：未使用导入、未定义变量
+    "I",   # isort：导入排序
+    "UP",  # pyupgrade：现代 Python 写法
+    "B",   # flake8-bugbear：常见缺陷
+    "C4",  # flake8-comprehensions：推导式与容器构造
+    "SIM", # flake8-simplify：冗余逻辑
+    "RUF", # Ruff 专属检查
+]
+# 项目文档与输出按要求使用中文全角标点，关闭同形字歧义检查。
+ignore = ["RUF001", "RUF002", "RUF003"]
+
+[tool.ruff.format]
+# 文档字符串里的示例代码也交给 formatter 维护。
+docstring-code-format = true
+
+[tool.pyright]
+include = ["src", "tests"]
+pythonVersion = "3.13"
+typeCheckingMode = "standard"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers --strict-config"

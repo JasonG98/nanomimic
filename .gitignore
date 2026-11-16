@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+
+# 工具缓存
+.pytest_cache/
+.ruff_cache/
+.pyright/
+node_modules/
+.uv-cache/
+
+# 运行产物（检查点、导出模型、日志）
+/runs/
+/outputs/
+*.onnx
+*.pt
+
+# 系统与编辑器
+.DS_Store
+.idea/
+.vscode/
