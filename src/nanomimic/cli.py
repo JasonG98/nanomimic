@@ -25,10 +25,18 @@ class TrainCmd(TrainConfig):
 
 @dataclass(frozen=True)
 class PlayCmd:
-    """用检查点在仿真中回放策略（T9 接入）。"""
+    """用检查点回放策略，同时叠加 env 0 的世界模型闭环虚影。"""
 
+    # 含 config.json、actor.pt 与 world_model.pt 的检查点目录。
     checkpoint: Path
+    # 原生窗口或 Viser 浏览器窗口。
     viewer: Literal["native", "viser"] = "native"
+    # 默认有 CUDA 就用 cuda:0，否则用 CPU。
+    device: str | None = None
+    # 定期重新对齐的步数；默认取参考回放配置。
+    num_steps_rollout: int = 1_000_000
+    # 达到指定步数后退出；默认一直回放直到关闭窗口或 Ctrl+C。
+    num_steps: int | None = None
 
 
 @dataclass(frozen=True)
@@ -79,7 +87,24 @@ def main() -> None:
             raise SystemExit(f"训练失败：{error}") from error
         return
     if isinstance(command, PlayCmd):
-        raise SystemExit("nanomimic play: 尚未实现（计划在 T9 接入）")
+        # macOS 原生窗口必须使用 MuJoCo 提供的主线程启动器。
+        if sys.platform == "darwin" and command.viewer == "native" and "MJPYTHON_BIN" not in os.environ:
+            launcher = Path(sys.executable).with_name("mjpython")
+            # uv 的 venv 使用解释器符号链接，mjpython 需要显式找到基座的 libpython。
+            fallback = os.environ.get("DYLD_FALLBACK_LIBRARY_PATH", "/usr/local/lib:/usr/lib")
+            os.environ["DYLD_FALLBACK_LIBRARY_PATH"] = f"{Path(sys.base_prefix) / 'lib'}:{fallback}"
+            os.execv(str(launcher), [str(launcher), "-m", "nanomimic.cli", *sys.argv[1:]])
+        from nanomimic.runtime.viewer import play
+
+        try:
+            play(command.checkpoint, command.viewer, command.device, command.num_steps_rollout, command.num_steps)
+        except (ValueError, FileNotFoundError) as error:
+            raise SystemExit(f"回放失败：{error}") from error
+        if sys.platform == "darwin" and command.viewer == "native" and command.num_steps is not None:
+            # mjpython 在发生回合重置后可能停在 Cocoa 原生退出阶段；此时两侧资源已显式关闭。
+            # 仅限成功完成的有限步自动回放，交互式窗口保留发布版生命周期。
+            os._exit(0)
+        return
     from nanomimic.runtime.export import export
 
     try:
