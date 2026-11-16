@@ -3,6 +3,36 @@
 记录实测数据、与参考仓库（HybridRobotics/supermimic）的差异、以及等待用户确认的事项。
 按任务追加，最新内容放在最前面。
 
+## 2026-11-16 · T5 策略与可微想象
+
+- 实现单任务 Actor（目标编码器、32 维 tanh 潜变量、历史解码器）、特权 Critic、
+  目标窗口、重锚定奖励、软终止与逐步 checkpoint 的可微想象。
+  数学目标与奖励分别置于 `goals.py`、`rewards.py`，供后续训练与回放复用。
+- 对拍最大绝对误差：奖励 2.33e-9、软终止 0、目标窗口 2.99e-7，均低于
+  1e-5。额外测试阈值处终止概率 0.5、同姿态的有限梯度及片段末帧钳位。
+- 固定种子、4 步想象、H=3、小网络：Actor 所有参数梯度有限，总梯度非零；
+  checkpoint 开关的奖励严格一致，梯度满足 atol=1e-6、rtol=1e-5。
+  前向和重算均未更改归一化计数，单步没有闭包捕获后续被修改的循环状态。
+- 明确测试了计分时序：预测后对当前参考计分，再推进参考时间；末端 Critic
+  观测使用推进后的目标。回报测试验证 r_t 乘 s_t、bootstrap 乘 s_H。
+- 参考默认 `BaseRunnerCfg.history_length=1`，本项目沿用；编码器与解码器均采用
+  2048、1024、512、256 隐藏层（参考 models.py），Critic 为 256、128。
+  CPU 测试显式减小网络，不改训练默认值。
+- 旋转误差 acos 在 ±1 附近按参考钳位 1e-7；软终止的倾斜误差为投影重力
+  z 分量之差；价值仅钳制上界 5×dt/(1−gamma)，允许负值。均与参考数学契约一致。
+- 想象从回放中已有的带噪历史开始，后续每步只调用一次统一噪声入口；与参考
+  GenCoord 一致，合成 sensor 不额外施加编码器固定偏置，真实采集保留该偏置。
+- ruff、格式检查（28 文件）、pyright（0 errors）、pytest（40 passed）通过。
+  夹具未修改；本任务无 SPEC 偏离，无 GPU 验收声明。
+
+```bash
+uv run pytest tests/test_imagine.py
+uv run ruff check .
+uv run ruff format --check .
+uv run pyright
+uv run pytest
+```
+
 ## 2026-11-16 · T4 传感器与回放缓冲
 
 - 实现 `synth_proprio`、统一的 `add_noise`、`HistoryRing` 与每环境环形回放。
