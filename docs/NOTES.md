@@ -3,6 +3,32 @@
 记录实测数据、与参考仓库（HybridRobotics/supermimic）的差异、以及等待用户确认的事项。
 按任务追加，最新内容放在最前面。
 
+## 2026-11-16 · T3 可微世界模型
+
+- 实现纯张量表示、半隐式积分、状态重建、FK、损失分组与 Dynamics。
+  `rotation.py` 和 `networks.py` 分别承载复用数学与网络构件，保持单文件约 300 行以内。
+- fp32 对拍（`atol=1e-5, rtol=0`）：represent、loss_groups、Bryson 权重误差为 0；
+  积分 aux 最大误差 1.20e-7、rep 最大误差 2.99e-7；FK 位置/四元数最大误差
+  4.18e-7，线速度 2.91e-7，角速度 8.05e-7。现有夹具未改动。
+- 零角速度积分及 FK 的梯度有限且非零；动作到动力学输出的梯度通过。
+  RunningNorm 分批合并统计量与一次性总体统计一致，前向不隐式更新。
+- 未明确的归一化细节采用合并批次矩，标准差下限 0.01；只由采集阶段显式更新，
+  避免想象、checkpoint 重算和评估污染统计。均值、方差、计数均进 state_dict。
+- 积分仍采用规格规定的完整 dt（substep 系数 1.0）。FK 独立按运动树传播位姿和
+  body 原点扭量，包含铰链原点偏移；没有引入参考类层次或仿真器依赖。
+- 默认 Dynamics 保持 3 × 2048；CPU 梯度测试显式使用小网络。
+- 检查通过：ruff、格式检查（20 文件）、pyright（0 errors）、pytest（27 passed）。
+  第三方 torch.jit.script 弃用警告与 T2 相同。无 GPU 验收声明，无 SPEC 偏离。
+- 本次用户已授权 T3–T6 各自独立提交、不推送；T1 保持待用户在 RTX 5060 Ti 上运行。
+
+```bash
+uv run pytest tests/test_model.py
+uv run ruff check .
+uv run ruff format --check .
+uv run pyright
+uv run pytest
+```
+
 ## 2026-11-16 · T2 仿真适配与对拍夹具
 
 ### 状态与实测
