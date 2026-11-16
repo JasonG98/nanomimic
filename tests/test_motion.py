@@ -12,8 +12,8 @@ import numpy as np
 import pytest
 import torch
 
-from nanomimic.motion import validate_motion_file
-from nanomimic.specs import Motion
+from nanomimic.common.specs import Motion
+from nanomimic.runtime.motion import validate_motion_file
 
 
 def test_fixture_integrity() -> None:

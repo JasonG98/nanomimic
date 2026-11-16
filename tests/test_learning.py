@@ -10,13 +10,13 @@ import pytest
 import torch
 from torch import nn
 
-from nanomimic.buffer import ReplayBatch, ReplayBuffer
-from nanomimic.learning import PolicyImprover, WorldModelFitter, gae_returns
-from nanomimic.model import Dynamics, DynamicsConfig, aux_state, integrate, reconstruct_full_state, represent
-from nanomimic.optim import Optimizers
-from nanomimic.policy import Actor, ActorConfig, Critic, CriticConfig
-from nanomimic.specs import Motion, RobotSpec
-from nanomimic.training_config import PolicyTrainConfig, TrainConfig, WorldModelConfig
+from nanomimic.common.specs import Motion, RobotSpec
+from nanomimic.models.model import Dynamics, DynamicsConfig, aux_state, integrate, reconstruct_full_state, represent
+from nanomimic.models.policy import Actor, ActorConfig, Critic, CriticConfig
+from nanomimic.rollout.buffer import ReplayBatch, ReplayBuffer
+from nanomimic.training.config import PolicyTrainConfig, TrainConfig, WorldModelConfig
+from nanomimic.training.learning import PolicyImprover, WorldModelFitter, gae_returns
+from nanomimic.training.optim import Optimizers
 
 
 def synthetic_batch(robot: RobotSpec, batch: int = 16, horizon: int = 3) -> ReplayBatch:

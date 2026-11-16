@@ -7,8 +7,8 @@ proprio 顺序固定为重力、角速度、相对关节位置、关节速度、
 import torch
 from torch import Tensor
 
-from nanomimic.model import joint_state
-from nanomimic.rotation import inverse_rotate
+from nanomimic.common.rotation import inverse_rotate
+from nanomimic.models.model import joint_state
 
 
 def synth_proprio(state: Tensor, aux: Tensor, last_action: Tensor, default_joint_pos: Tensor) -> Tensor:

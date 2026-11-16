@@ -1,4 +1,4 @@
-"""训练排程与真实环境采集。
+"""训练排程、真实环境采集与标量输出。
 
 每轮采集一步，按回放比例累积训练次数；每次先拟合世界模型再改进策略。
 检查点不包含模拟器和回放，恢复后重新预热，参数、统计量和优化器保持连续。
@@ -6,22 +6,53 @@
 
 from math import isfinite
 from pathlib import Path
+from typing import Any
 
 import torch
 from torch import nn
 
-from nanomimic.buffer import ReplayBatch, ReplayBuffer
-from nanomimic.checkpoints import load_checkpoint, save_checkpoint
-from nanomimic.goals import actor_goal
-from nanomimic.learning import PolicyImprover, WorldModelFitter
-from nanomimic.model import Dynamics, represent
-from nanomimic.optim import Optimizers
-from nanomimic.policy import Actor, Critic
-from nanomimic.sensor import HistoryRing, add_noise
-from nanomimic.sim import Sim
-from nanomimic.sinks import ScalarSink
-from nanomimic.specs import SimConfig
-from nanomimic.training_config import TrainConfig, resolve_config
+from nanomimic.common.specs import SimConfig
+from nanomimic.models.model import Dynamics, represent
+from nanomimic.models.policy import Actor, Critic
+from nanomimic.rollout.buffer import ReplayBatch, ReplayBuffer
+from nanomimic.rollout.imagine import actor_goal
+from nanomimic.rollout.sensor import HistoryRing, add_noise
+from nanomimic.runtime.sim import Sim
+from nanomimic.training.checkpoints import load_checkpoint, save_checkpoint
+from nanomimic.training.config import TrainConfig, resolve_config
+from nanomimic.training.learning import PolicyImprover, WorldModelFitter
+from nanomimic.training.optim import Optimizers
+
+
+class ScalarSink:
+    """终端默认输出标量；W&B 仅在显式配置时连接，不上传产物。"""
+
+    def __init__(self, project: str | None = None) -> None:
+        self._run: Any = None
+        if project is not None:
+            import wandb
+
+            self._run = wandb.init(project=project)
+
+    def log(self, iteration: int, metrics: dict[str, float]) -> None:
+        labels = {
+            "wm_loss": "世界模型损失",
+            "actor_loss": "策略损失",
+            "critic_loss": "价值损失",
+            "sim_reward": "仿真奖励",
+            "done_fraction": "重置比例",
+            "updates": "累计训练次数",
+            "cuda_allocated_gb": "PyTorch 显存峰值 GB",
+            "cuda_reserved_gb": "PyTorch 保留显存峰值 GB",
+        }
+        values = " | ".join(f"{labels.get(name, name)} {value:.6g}" for name, value in metrics.items())
+        print(f"迭代 {iteration} | {values}", flush=True)
+        if self._run is not None:
+            self._run.log(metrics, step=iteration)
+
+    def close(self) -> None:
+        if self._run is not None:
+            self._run.finish()
 
 
 class Collector:

@@ -21,8 +21,8 @@ from mjlab.tasks.tracking.mdp.commands import MotionCommand, MotionCommandCfg
 from mjlab.utils.lab_api.math import matrix_from_quat, subtract_frame_transforms
 from torch import Tensor
 
-from nanomimic.motion import validate_motion_file
-from nanomimic.specs import ContextSpec, Motion, Obs, RobotSpec, SimConfig
+from nanomimic.common.specs import ContextSpec, Motion, Obs, RobotSpec, SimConfig
+from nanomimic.runtime.motion import validate_motion_file
 
 
 class _ClipMotion(MotionCommand):

@@ -8,9 +8,9 @@ import pytest
 import torch
 from torch import Tensor
 
-from nanomimic.buffer import ReplayBatch, ReplayBuffer
-from nanomimic.sensor import HistoryRing, add_noise, noise_half_width, synth_proprio
-from nanomimic.specs import RobotSpec
+from nanomimic.common.specs import RobotSpec
+from nanomimic.rollout.buffer import ReplayBatch, ReplayBuffer
+from nanomimic.rollout.sensor import HistoryRing, add_noise, noise_half_width, synth_proprio
 
 
 def test_synth_and_noise(reference: dict[str, Tensor], robot: RobotSpec) -> None:

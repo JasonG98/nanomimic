@@ -11,8 +11,8 @@ from tempfile import TemporaryDirectory
 import torch
 from torch import nn
 
-from nanomimic.optim import Optimizers
-from nanomimic.training_config import TrainConfig, config_dict
+from nanomimic.training.config import TrainConfig, config_dict
+from nanomimic.training.optim import Optimizers
 
 
 def save_checkpoint(

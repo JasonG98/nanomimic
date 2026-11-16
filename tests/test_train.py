@@ -12,13 +12,12 @@ import pytest
 import torch
 
 from nanomimic.cli import TrainCmd, parse_command
-from nanomimic.model import DynamicsConfig
-from nanomimic.policy import ActorConfig, CriticConfig
-from nanomimic.sim import Sim
-from nanomimic.sinks import ScalarSink
-from nanomimic.specs import SimConfig
-from nanomimic.train import Trainer
-from nanomimic.training_config import PolicyTrainConfig, TrainConfig, WorldModelConfig, load_config, resolve_config
+from nanomimic.common.specs import SimConfig
+from nanomimic.models.model import DynamicsConfig
+from nanomimic.models.policy import ActorConfig, CriticConfig
+from nanomimic.runtime.sim import Sim
+from nanomimic.training.config import PolicyTrainConfig, TrainConfig, WorldModelConfig, load_config, resolve_config
+from nanomimic.training.train import ScalarSink, Trainer
 
 
 def _small_config(tmp_path: Path) -> TrainConfig:

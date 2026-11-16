@@ -9,13 +9,13 @@ from functools import partial
 import torch
 from torch import Tensor
 
-from nanomimic.buffer import ReplayBatch, ReplayBuffer
-from nanomimic.imagine import ImagineConfig, Rollout, discounted_return, imagine
-from nanomimic.model import Dynamics, aux_state, bryson_weights, loss_groups, represent
-from nanomimic.optim import Optimizers, frozen_parameters
-from nanomimic.policy import Actor, Critic
-from nanomimic.specs import Motion, RobotSpec
-from nanomimic.training_config import TrainConfig
+from nanomimic.common.specs import Motion, RobotSpec
+from nanomimic.models.model import Dynamics, aux_state, bryson_weights, loss_groups, represent
+from nanomimic.models.policy import Actor, Critic
+from nanomimic.rollout.buffer import ReplayBatch, ReplayBuffer
+from nanomimic.rollout.imagine import ImagineConfig, Rollout, discounted_return, imagine
+from nanomimic.training.config import TrainConfig
+from nanomimic.training.optim import Optimizers, frozen_parameters
 
 
 def model_rollout(dynamics: Dynamics, full: Tensor, actions: Tensor, ctx: Tensor) -> tuple[Tensor, Tensor]:

@@ -36,13 +36,14 @@ uv run nanomimic export --checkpoint <dir> --out <file.onnx> [--verify]
 - 公共函数有类型标注；配置用 frozen dataclass，经 tyro 暴露。
 - 不用 TensorDict，批数据用 dataclass；不用全局状态；优先纯函数。
 - 每个文件开头用 3 到 5 行说明职责与不变量；张量形状写在注释里（B 批、T 时间、J 关节、N 目标帧、H 历史帧）。
-- 导入规则：`model.py`、`policy.py`、`sensor.py`、`imagine.py`、`buffer.py` 不得导入 mjlab、mujoco、wandb；只有 `sim.py` 与 `viewer.py` 可以导入 mjlab。这条由测试强制检查。
+- 源码按 `common/`、`models/`、`rollout/`、`training/`、`runtime/` 分组，完整目录与职责见 `docs/SPEC.md` 第 2 节。目标、奖励与软终止集中在 `rollout/imagine.py`；标量日志放在 `training/train.py`。
+- 导入规则：`common/`、`models/`、`rollout/` 内的全部模块不得导入 mjlab、mujoco、wandb；全包只有 `runtime/sim.py` 与 `runtime/viewer.py` 可以导入 mjlab。测试递归扫描子包，按完整相对路径判断例外。
 - 数值敏感处（积分、FK、奖励、软终止、Bryson 权重）必须有对拍夹具测试，误差小于 1e-5（fp32）。
 
 ## 不要做
 
 - MaxCoord 与解析 IK、velocity 任务与 latent BC、多任务、ReturnSampler、手写 CUDA graph、benchmark、W&B 产物与动作库注册表、PPO、真机运行时。
-- 依赖 mjlab 的私有 fork。只用发布版；缺的接口在 `sim.py` 里用子类补。
+- 依赖 mjlab 的私有 fork。只用发布版；缺的接口在 `runtime/sim.py` 里用子类补。
 - 手改 `tests/fixtures/` 下的夹具。需要更新时用 `tools/make_fixtures.py` 重新生成，并在 `docs/NOTES.md` 说明原因。
 - 为了让测试通过而放宽误差阈值或删测试。
 

@@ -9,7 +9,7 @@ from dataclasses import dataclass
 import torch
 from torch import Tensor, nn
 
-from nanomimic.networks import RunningNorm, mlp
+from nanomimic.common.networks import RunningNorm, mlp
 
 
 @dataclass(frozen=True)

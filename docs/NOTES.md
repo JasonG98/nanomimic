@@ -3,6 +3,42 @@
 记录实测数据、与参考仓库（HybridRobotics/supermimic）的差异、以及等待用户确认的事项。
 按任务追加，最新内容放在最前面。
 
+## 2026-11-16 · 按职责整理目录（用户确认的方案二）
+
+### 结构与合并
+
+- 用户确认按 `common/`、`models/`、`rollout/`、`training/`、`runtime/` 五个目录
+  组织源码；当前实现文件由 19 个减为 16 个，不计 `__init__.py`。
+- 原顶层 `specs.py`、`rotation.py`、`networks.py` 移入 `common/`；
+  `model.py`、`policy.py` 移入 `models/`；`sensor.py`、`buffer.py`、`imagine.py`
+  移入 `rollout/`；`sim.py`、`motion.py` 移入 `runtime/`。
+- `goals.py` 与 `rewards.py` 合入 `rollout/imagine.py`，保留目标构造、重锚定、
+  奖励与软终止的数值表达式；`sinks.py` 合入 `training/train.py`。
+- 其余训练文件移入 `training/`，`training_config.py` 简写为 `config.py`。
+  后续 T8、T9 分别使用 `runtime/export.py` 与 `runtime/viewer.py`，本次不提前实现。
+- 更新全部源码、测试和工具脚本的导入路径；包入口仍为 `nanomimic.cli:main`，
+  CLI 参数和四文件检查点格式不变。各子包初始化只保留说明，不加载子模块。
+- 导入规则递归扫描全部子包，对 `common/`、`models/`、`rollout/` 全部模块检查
+  mjlab / mujoco / wandb 隔离；mjlab 例外限于完整路径 `runtime/sim.py` 和
+  `runtime/viewer.py`，其他目录中的同名文件不获得例外。
+- 已同步 `docs/SPEC.md` 的目录、模块职责、任务路径和导入规则，以及 `AGENTS.md`
+  与 `README.md`。此前 T6 的「无 SPEC 偏离」未反映目录与规模的差异，表述不够准确；
+  本次目录变更已获用户确认，并写入现行规格。
+
+### 验证
+
+- 迁移前：ruff、格式检查、pyright（0 errors）、pytest（47 passed，29.24 秒）通过。
+- 迁移后：ruff、格式检查（38 文件）、pyright（0 errors）、pytest
+  **47 passed（28.33 秒）** 全部通过；仅有已记录的第三方 torch.jit.script 弃用警告。
+- 与迁移前 HEAD 对比：20 个原模块归一化导入路径并移除说明字符串后，全部实现定义
+  的语法树一致；现有夹具逐字节一致。最大文件仍为 `runtime/sim.py`（274 行），
+  合并后的 `rollout/imagine.py` 为 169 行，`training/train.py` 为 176 行。
+- `uv run nanomimic --help` 与 `uv run nanomimic train --help` 正常退出。
+- 参考仓库未修改；本次只整理代码组织，GPU 验收仍待用户在 RTX 5060 Ti 上运行。
+
+下方 T0–T6 的文件名、目录和统计数据保留各任务当时的实测记录；现行路径以
+`docs/SPEC.md` 第 2 节及上述迁移说明为准。
+
 ## 2026-11-16 · T6 训练循环与 CLI（CPU 通过，GPU 待运行）
 
 ### 实现与 CPU 实测

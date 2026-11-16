@@ -12,8 +12,8 @@ import pytest
 import torch
 from mjlab.tasks.registry import load_env_cfg
 
-from nanomimic.sim import Sim
-from nanomimic.specs import SimConfig
+from nanomimic.common.specs import SimConfig
+from nanomimic.runtime.sim import Sim
 
 
 @pytest.fixture(scope="module")

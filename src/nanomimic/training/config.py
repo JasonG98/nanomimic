@@ -9,8 +9,8 @@ from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any, Literal
 
-from nanomimic.model import DynamicsConfig
-from nanomimic.policy import ActorConfig, CriticConfig
+from nanomimic.models.model import DynamicsConfig
+from nanomimic.models.policy import ActorConfig, CriticConfig
 
 
 @dataclass(frozen=True)

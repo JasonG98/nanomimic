@@ -14,7 +14,7 @@ from typing import Annotated, Literal, NoReturn
 
 import tyro
 
-from nanomimic.training_config import TrainConfig, load_config
+from nanomimic.training.config import TrainConfig, load_config
 
 
 @dataclass(frozen=True)
@@ -72,7 +72,7 @@ def main() -> None:
     except (ValueError, FileNotFoundError) as error:
         raise SystemExit(f"读取配置失败：{error}") from error
     if isinstance(command, TrainCmd):
-        from nanomimic.train import train
+        from nanomimic.training.train import train
 
         try:
             train(command)

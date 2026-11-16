@@ -11,8 +11,8 @@ from time import perf_counter
 import torch
 import tyro
 
-from nanomimic.sim import Sim
-from nanomimic.specs import SimConfig
+from nanomimic.common.specs import SimConfig
+from nanomimic.runtime.sim import Sim
 
 
 @dataclass(frozen=True)

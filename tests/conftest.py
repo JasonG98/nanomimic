@@ -12,7 +12,7 @@ import pytest
 import torch
 from torch import Tensor
 
-from nanomimic.specs import Motion, RobotSpec
+from nanomimic.common.specs import Motion, RobotSpec
 
 
 @pytest.fixture(scope="session")

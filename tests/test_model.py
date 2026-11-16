@@ -7,7 +7,9 @@
 import torch
 from torch import Tensor
 
-from nanomimic.model import (
+from nanomimic.common.networks import RunningNorm
+from nanomimic.common.specs import RobotSpec
+from nanomimic.models.model import (
     Dynamics,
     DynamicsConfig,
     aux_state,
@@ -19,8 +21,6 @@ from nanomimic.model import (
     represent,
     world_bodies,
 )
-from nanomimic.networks import RunningNorm
-from nanomimic.specs import RobotSpec
 
 
 def test_state_and_integration(reference: dict[str, Tensor]) -> None:

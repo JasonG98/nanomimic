@@ -10,9 +10,9 @@ from math import sqrt
 import torch
 from torch import Tensor, nn
 
-from nanomimic.networks import RunningNorm, mlp
-from nanomimic.rotation import from_rotvec, inverse_rotate, matrix, multiply, rotate
-from nanomimic.specs import RobotSpec
+from nanomimic.common.networks import RunningNorm, mlp
+from nanomimic.common.rotation import from_rotvec, inverse_rotate, matrix, multiply, rotate
+from nanomimic.common.specs import RobotSpec
 
 
 def represent(full_state: Tensor) -> Tensor:

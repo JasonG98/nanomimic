@@ -7,14 +7,21 @@
 import torch
 from torch import Tensor
 
-from nanomimic.buffer import StartBatch
-from nanomimic.goals import actor_goal, wm_goal
-from nanomimic.imagine import ImagineConfig, Rollout, discounted_return, imagine
-from nanomimic.model import Bodies, Dynamics, DynamicsConfig, aux_state, represent, world_bodies
-from nanomimic.policy import Actor, ActorConfig, Critic, CriticConfig
-from nanomimic.rewards import termination_probability, tracking_reward
-from nanomimic.sensor import synth_proprio
-from nanomimic.specs import Motion, RobotSpec
+from nanomimic.common.specs import Motion, RobotSpec
+from nanomimic.models.model import Bodies, Dynamics, DynamicsConfig, aux_state, represent, world_bodies
+from nanomimic.models.policy import Actor, ActorConfig, Critic, CriticConfig
+from nanomimic.rollout.buffer import StartBatch
+from nanomimic.rollout.imagine import (
+    ImagineConfig,
+    Rollout,
+    actor_goal,
+    discounted_return,
+    imagine,
+    termination_probability,
+    tracking_reward,
+    wm_goal,
+)
+from nanomimic.rollout.sensor import synth_proprio
 
 
 def test_reward_termination_and_goals(reference: dict[str, Tensor], robot: RobotSpec, motion: Motion) -> None:
