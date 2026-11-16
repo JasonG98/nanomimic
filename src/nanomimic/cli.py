@@ -1,21 +1,25 @@
 """命令行入口：train / play / export 三个子命令。
 
-T0 只提供参数骨架，解析后以非零码提示待实现的任务；
-训练、回放与导出的实际逻辑分别在 T6、T9、T8 接入本文件。
+训练支持本地动作与断点恢复，参数由 frozen dataclass 经 tyro 暴露。
+回放与导出的实际逻辑分别留给 T9、T8 接入本文件。
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import argparse
+import sys
+from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Annotated, Literal, NoReturn
 
 import tyro
 
+from nanomimic.training_config import TrainConfig, load_config
+
 
 @dataclass(frozen=True)
-class TrainCmd:
-    """在仿真中训练世界模型与策略（T6 接入）。"""
+class TrainCmd(TrainConfig):
+    """在仿真中训练世界模型与策略，CPU 验收需显式缩小配置。"""
 
 
 @dataclass(frozen=True)
@@ -47,15 +51,34 @@ def _pending(command: str, task: str) -> NoReturn:
     raise SystemExit(f"nanomimic {command}: 尚未实现（计划在 {task} 接入）")
 
 
-def main() -> None:
-    """解析并分发子命令；T0 阶段仅验证命令行契约。"""
-    command = tyro.cli(
-        Command,
-        prog="nanomimic",
-        description="nanomimic：训练、回放与导出人形动作跟踪策略。",
+def parse_command(arguments: list[str]) -> TrainCmd | PlayCmd | ExportCmd:
+    """先读取恢复配置作为 tyro 默认值，确保显式参数包括默认值都可覆盖。"""
+    if arguments[:1] == ["train"]:
+        probe = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
+        probe.add_argument("--resume", type=lambda value: None if value == "None" else Path(value))
+        known, _ = probe.parse_known_args(arguments[1:])
+        saved = load_config(known.resume) if known.resume is not None else TrainConfig()
+        default = TrainCmd(**{item.name: getattr(saved, item.name) for item in fields(saved)})
+        return tyro.cli(TrainCmd, default=default, args=arguments[1:], prog="nanomimic train")
+    return tyro.cli(
+        Command, args=arguments, prog="nanomimic", description="nanomimic：训练、回放与导出人形动作跟踪策略。"
     )
+
+
+def main() -> None:
+    """解析并分发子命令。"""
+    try:
+        command = parse_command(sys.argv[1:])
+    except (ValueError, FileNotFoundError) as error:
+        raise SystemExit(f"读取配置失败：{error}") from error
     if isinstance(command, TrainCmd):
-        _pending("train", "T6")
+        from nanomimic.train import train
+
+        try:
+            train(command)
+        except (ValueError, FileNotFoundError, FileExistsError) as error:
+            raise SystemExit(f"训练失败：{error}") from error
+        return
     if isinstance(command, PlayCmd):
         _pending("play", "T9")
     _pending("export", "T8")

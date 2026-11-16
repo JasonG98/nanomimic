@@ -3,6 +3,115 @@
 记录实测数据、与参考仓库（HybridRobotics/supermimic）的差异、以及等待用户确认的事项。
 按任务追加，最新内容放在最前面。
 
+## 2026-11-16 · T6 训练循环与 CLI（CPU 通过，GPU 待运行）
+
+### 实现与 CPU 实测
+
+- 接入 `nanomimic train`：Collector → WorldModelFitter → PolicyImprover。
+  Trainer 只排程；训练次数按 replay_ratio×num_envs/(num_batches×batch×horizon)
+  累积，包含预热期的余额。单测验证每步 0.5 次的余额在可用窗口出现后正确消费。
+- 世界模型每个窗口预测 horizon 步，因此读取 horizon+1 个状态；默认 horizon=8
+  不变。全通道平方误差按 Bryson 权重加权后取均值，范数裁剪为 1.0。
+- Actor 对存活概率折扣回报与末端价值反向传播；动力学和 Critic 参数冻结，
+  但保留对输入的导数。Critic 使用 lambda=0.95 的 GAE，单测确认实际执行 5×4
+  个 minibatch；Actor 和 Critic 均使用 beta2=0.95、范数 1.0 与元素 0.1 裁剪。
+- 每个 MLP 的中间 Linear 权重使用发布版 `torch.optim.Muon`，其余参数使用
+  Adam；参数分组无遗漏、无重复。学习率默认均为 2e-4，Muon 采用参考的
+  `match_rms_adamw` 缩放；SPEC 未规定权重衰减，选择 0，不额外加入正则项。
+- 合成监督系统由独立解析积分产生标签，固定种子，小网络、CPU、60 次更新：
+  世界模型损失 **0.706855 → 0.00141098**，下降约 99.80%。默认训练宽度与规模未改。
+- 真实 mjlab CPU 运行：2 环境、H=3、世界模型和策略 batch=2 / horizon=2，
+  先跑 4 次迭代保存，再恢复到第 50 次，累计 25 轮 fit/improve。
+  `aot_eager` 与默认 `inductor` 两种编译后端均完成；最终所有网络参数、归一化
+  张量均有限。Inductor 最后一次世界模型损失 0.175211、策略损失 -0.493881、
+  Critic 损失 0.00105201；这些数字只说明闭环可运行，不是动作跟踪效果验收。
+- CPU 编译梯度验收：世界模型和策略的 `aot_eager` 与未编译版本一致
+  （atol=1e-6、rtol=1e-5）；策略改进前后动力学 state_dict 严格不变。
+- 检查点每 1000 次及结束时保存到独立迭代目录：world_model.pt、actor.pt、
+  critic.pt、config.json（schema_version=1）。含归一化、优化器动量、RNG、迭代号、
+  更新次数及小数余额。临时目录写完后重命名，已有目录拒绝覆盖。
+- `--resume` 先把保存配置交给 tyro 作为默认值，再应用本次显式参数，包括显式
+  设回默认值；显式学习率覆盖不会被优化器状态覆盖。恢复逐项验证参数、统计量、
+  优化器张量完全一致。仿真和回放重新初始化、预热，不承诺逐步轨迹完全复现。
+- 默认日志每 10 次，W&B 仅在显式指定 `--wandb-project` 时创建标量 Sink；
+  本机未连接 W&B。已核对 Context7 的 checkpoint、Muon、compile、tyro defaults
+  和 W&B scalar API，并核对本地 torch 2.15 的 Muon 实际默认值。
+- 最终检查：ruff、格式检查（36 文件）、pyright（0 errors）、完整 pytest
+  **47 passed（27.34 秒）**。仅有已记录的第三方 torch.jit.script 弃用警告。
+  包内最大文件为 sim.py（274 行）；现有对拍夹具未修改。
+- 无 SPEC 偏离。T3、T4、T5 已分别提交；T6 按本次授权独立提交，不推送。
+
+CPU 复现（输出目录已存在时换一个新目录）：
+
+```bash
+uv run pytest tests/test_learning.py -s
+uv run nanomimic train \
+  --motion-file tests/fixtures/motion.npz --device cpu --num-envs 2 \
+  --max-iterations 4 --buffer-capacity 16 --replay-ratio 1 \
+  --wm.batch 2 --wm.horizon 2 --wm.num-batches 1 \
+  --policy.batch 2 --policy.horizon 2 \
+  --dynamics.hidden 16 16 16 --actor.hidden 16 12 8 8 --critic.hidden 16 8 \
+  --actor.history-length 3 --log-interval 1 --output runs/t6-cpu
+uv run nanomimic train --resume runs/t6-cpu/00000004 \
+  --max-iterations 50 --log-interval 10 --output runs/t6-cpu-resume
+uv run ruff check .
+uv run ruff format --check .
+uv run pyright
+uv run pytest
+```
+
+CPU 首次 Inductor 编译较慢；可显式加 `--compile-backend aot_eager` 验证编译图，
+或 `--no-compile` 运行普通 CPU 调试。受限会话可在 T2 的缓存设置之外设置：
+
+```bash
+export TORCHINDUCTOR_CACHE_DIR=/private/tmp/nanomimic-inductor
+```
+
+### T1 和 T6 GPU：待用户在 RTX 5060 Ti 上运行
+
+本机是 M1 Pro，无 NVIDIA/CUDA；**未运行 GPU 验收，也未验证显存峰值低于 15GB**。
+T1 仍按下方 T2 记录的两档命令测量，默认 num_envs=2048 暂不修改。
+T6 请使用默认网络、批量、想象步数和缓冲，只把迭代数设为 50：
+
+```bash
+uv run python -c "import torch; print(torch.__version__, torch.version.cuda, torch.cuda.is_available())"
+uv run nanomimic train --motion-file tests/fixtures/motion.npz \
+  --device cuda:0 --max-iterations 50 --output runs/t6-gpu
+```
+
+在另一个终端从训练开始前采样，训练完成后 Ctrl+C 停止。排除其他 GPU 任务，
+检查整张卡显存以涵盖 Warp / MuJoCo 分配；日志中的 PyTorch 峰值不是总显存：
+
+```bash
+mkdir -p runs
+nvidia-smi --id=0 --query-gpu=memory.used --format=csv,noheader,nounits \
+  -lms 200 > runs/t6-gpu-vram-mib.csv
+```
+
+训练及显存采样结束后验证检查点与显存记录：
+
+```bash
+uv run python - <<'PY'
+from pathlib import Path
+import torch
+
+directory = Path("runs/t6-gpu/00000050")
+for name in ("world_model", "actor", "critic"):
+    payload = torch.load(directory / f"{name}.pt", map_location="cpu", weights_only=True)
+    assert payload["iteration"] == 50, "未完成 50 次迭代"
+    assert all(torch.isfinite(value).all() for value in payload["model"].values()), name
+    if name == "world_model":
+        assert payload["progress"]["updates"] > 0, "尚未执行训练更新"
+samples = Path("runs/t6-gpu-vram-mib.csv").read_text().splitlines()
+peak_gb = max(int(value.strip()) for value in samples if value.strip()) * 1024**2 / 1e9
+assert peak_gb < 15, f"显存峰值超限：{peak_gb:.3f} GB"
+print(f"50 次迭代检查点有限，总显存采样峰值 {peak_gb:.3f} GB")
+PY
+```
+
+此合成动作仅用于 T6 稳定性验收；T7 的 lafan_run1_subject5 收敛效果和阈值比较
+仍未开展。GPU 数据到手后再补记实际峰值、CUDA 构建与是否通过。
+
 ## 2026-11-16 · T5 策略与可微想象
 
 - 实现单任务 Actor（目标编码器、32 维 tanh 潜变量、历史解码器）、特权 Critic、
