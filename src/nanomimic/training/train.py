@@ -2,11 +2,16 @@
 
 每轮采集一步，按回放比例累积训练次数；每次先拟合世界模型再改进策略。
 检查点不包含模拟器和回放，恢复后重新预热，参数、统计量和优化器保持连续。
+每次启动使用独立时间戳目录，每轮记录指标，曲线与检查点同步更新。
 """
 
+import json
+from datetime import datetime
+from itertools import count
 from math import isfinite
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import torch
 from torch import nn
@@ -17,25 +22,23 @@ from nanomimic.models.policy import Actor, Critic
 from nanomimic.rollout.buffer import ReplayBatch, ReplayBuffer
 from nanomimic.rollout.imagine import actor_goal
 from nanomimic.rollout.sensor import HistoryRing, add_noise
+from nanomimic.runtime.paths import write_json
 from nanomimic.runtime.sim import Sim
 from nanomimic.training.checkpoints import load_checkpoint, save_checkpoint
-from nanomimic.training.config import TrainConfig, resolve_config
+from nanomimic.training.config import TrainConfig, config_dict, resolve_config
+from nanomimic.training.curves import plot_training_curves
 from nanomimic.training.learning import PolicyImprover, WorldModelFitter
 from nanomimic.training.optim import Optimizers
 
 
 class ScalarSink:
-    """终端默认输出标量；W&B 仅在显式配置时连接，不上传产物。"""
+    """逐轮落盘指标、定期打印和绘图；W&B 仅在显式配置时发送标量。"""
 
-    def __init__(self, project: str | None = None) -> None:
-        self._run: Any = None
-        if project is not None:
-            import wandb
-
-            self._run = wandb.init(project=project)
-
-    def log(self, iteration: int, metrics: dict[str, float]) -> None:
-        labels = {
+    def __init__(self, project: str | None = None, *, output: Path | None = None) -> None:
+        self._output = output
+        self._history: list[dict[str, float]] = []
+        self._plotted_iteration: int | None = None
+        self._labels = {
             "wm_loss": "世界模型损失",
             "actor_loss": "策略损失",
             "critic_loss": "价值损失",
@@ -45,14 +48,52 @@ class ScalarSink:
             "cuda_allocated_gb": "PyTorch 显存峰值 GB",
             "cuda_reserved_gb": "PyTorch 保留显存峰值 GB",
         }
-        values = " | ".join(f"{labels.get(name, name)} {value:.6g}" for name, value in metrics.items())
+        self._run: Any = None
+        if project is not None:
+            import wandb
+
+            self._run = wandb.init(project=project)
+        self._stream = None if output is None else (output / "metrics.jsonl").open("x", encoding="utf-8", buffering=1)
+
+    def record(self, iteration: int, metrics: dict[str, float]) -> None:
+        """记录每次采集迭代的实际指标，未执行训练时不补损失。"""
+        if self._stream is not None:
+            row = {"iteration": iteration, **metrics}
+            self._stream.write(json.dumps(row, ensure_ascii=False, allow_nan=False) + "\n")
+            self._history.append(row)
+
+    def log(self, iteration: int, metrics: dict[str, float]) -> None:
+        values = " | ".join(f"{self._labels.get(name, name)} {value:.6g}" for name, value in metrics.items())
         print(f"迭代 {iteration} | {values}", flush=True)
         if self._run is not None:
             self._run.log(metrics, step=iteration)
 
+    def plot(self) -> None:
+        """曲线覆盖更新到最近一轮；结束恰逢保存周期时不重复绘制。"""
+        if self._output is not None and self._history:
+            iteration = int(self._history[-1]["iteration"])
+            if iteration != self._plotted_iteration:
+                plot_training_curves(self._history, self._output, self._labels)
+                self._plotted_iteration = iteration
+
     def close(self) -> None:
+        if self._stream is not None:
+            self._stream.close()
         if self._run is not None:
             self._run.finish()
+
+
+def _create_run_directory(root: Path) -> Path:
+    root.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y%m%d_%H%M%S")
+    for suffix in count():
+        directory = root / (stamp if suffix == 0 else f"{stamp}_{suffix:02d}")
+        try:
+            directory.mkdir()
+        except FileExistsError:
+            continue
+        return directory
+    raise AssertionError("无法创建训练输出目录")
 
 
 class Collector:
@@ -107,6 +148,19 @@ class Trainer:
             self.last_saved_iteration = self.iteration
             if cfg.max_iterations < self.iteration:
                 raise ValueError("max_iterations 不能小于检查点中已完成的迭代号")
+        # 配置保留输出根目录，续训时沿用根目录创建新的运行，避免嵌套时间戳。
+        self.output = _create_run_directory(cfg.output)
+        for name in ("checkpoints", "evaluations", "exports"):
+            (self.output / name).mkdir()
+        write_json(self.output / "config.json", config_dict(cfg))
+        write_json(
+            self.output / "run.json",
+            {
+                "schema_version": 1,
+                "created_at": datetime.now(ZoneInfo("Asia/Shanghai")).isoformat(),
+                "resume": None if cfg.resume is None else str(cfg.resume),
+            },
+        )
         if sim.device.type == "cuda":
             torch.cuda.reset_peak_memory_stats(sim.device)
 
@@ -143,7 +197,7 @@ class Trainer:
 
     def save(self) -> Path:
         if self.last_saved_iteration != self.iteration:
-            directory = self.cfg.output / f"{self.iteration:08d}"
+            directory = self.output / "checkpoints" / f"{self.iteration:08d}"
             progress = {"iteration": self.iteration, "updates": self.updates, "credit": self.credit}
             save_checkpoint(directory, self.cfg, self.models(), progress)
             self.last_checkpoint, self.last_saved_iteration = directory, self.iteration
@@ -153,11 +207,15 @@ class Trainer:
     def run(self, sink: ScalarSink) -> Path:
         while self.iteration < self.cfg.max_iterations:
             metrics = self.step()
+            sink.record(self.iteration, metrics)
             if self.iteration % self.cfg.log_interval == 0:
                 sink.log(self.iteration, metrics)
             if self.iteration % self.cfg.save_interval == 0:
                 self.save()
-        return self.save()
+                sink.plot()
+        result = self.save()
+        sink.plot()
+        return result
 
 
 def train(cfg: TrainConfig) -> Path:
@@ -167,9 +225,11 @@ def train(cfg: TrainConfig) -> Path:
         raise ValueError("CUDA 不可用；CPU 验收请显式设置 --device cpu 并缩小环境数、批量与网络")
     assert cfg.motion_file is not None
     with Sim(SimConfig(cfg.motion_file, cfg.num_envs, cfg.device, cfg.seed)) as sim:
-        sink = ScalarSink(cfg.wandb_project)
+        trainer = Trainer(sim, cfg)
+        print(f"训练输出目录：{trainer.output}", flush=True)
+        sink = ScalarSink(cfg.wandb_project, output=trainer.output)
         try:
-            result = Trainer(sim, cfg).run(sink)
+            result = trainer.run(sink)
         finally:
             sink.close()
     print(f"训练已结束，检查点：{result}", flush=True)

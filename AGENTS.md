@@ -32,7 +32,6 @@ uv run nanomimic export --checkpoint <dir> --out <file.onnx> [--verify]
 
 ## 代码规范
 
-- 单文件不超过约 300 行；超过就拆，或检查是否在做规格之外的事。
 - 公共函数有类型标注；配置用 frozen dataclass，经 tyro 暴露。
 - 不用 TensorDict，批数据用 dataclass；不用全局状态；优先纯函数。
 - 每个文件开头用 3 到 5 行说明职责与不变量；张量形状写在注释里（B 批、T 时间、J 关节、N 目标帧、H 历史帧）。

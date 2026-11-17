@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = "==3.13.*"
 resolution-markers = [
     "sys_platform == 'linux'",
@@ -985,9 +985,11 @@ name = "nanomimic"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "matplotlib" },
     { name = "mjlab" },
     { name = "onnx" },
     { name = "onnxruntime" },
+    { name = "onnxscript" },
     { name = "torch", version = "2.15.0", source = { registry = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple/" }, marker = "sys_platform != 'linux'" },
     { name = "torch", version = "2.15.0+cu132", source = { registry = "https://download.pytorch.org/whl/cu132" }, marker = "sys_platform == 'linux'" },
     { name = "tyro" },
@@ -1002,9 +1004,11 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "matplotlib", specifier = ">=3.11,<4" },
     { name = "mjlab", specifier = ">=1.6.1,<2" },
     { name = "onnx", specifier = ">=1.23" },
     { name = "onnxruntime", specifier = ">=1.32" },
+    { name = "onnxscript", specifier = ">=0.5.4" },
     { name = "torch", marker = "sys_platform != 'linux'", specifier = ">=2.15,<2.16" },
     { name = "torch", marker = "sys_platform == 'linux'", specifier = ">=2.15,<2.16", index = "https://download.pytorch.org/whl/cu132" },
     { name = "tyro", specifier = ">=1.0.17" },

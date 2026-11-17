@@ -4,7 +4,7 @@
 梯度先裁剪范数，再按需裁剪元素；非有限损失或梯度直接报错。
 """
 
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from typing import Any
 
@@ -56,7 +56,7 @@ class Optimizers:
 
 
 @contextmanager
-def frozen_parameters(*modules: nn.Module) -> Iterator[None]:
+def frozen_parameters(*modules: nn.Module) -> Generator[None]:
     """冻结参数更新但保留网络对输入的导数，退出后恢复原标志。"""
     parameters = [parameter for module in modules for parameter in module.parameters()]
     previous = [parameter.requires_grad for parameter in parameters]

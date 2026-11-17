@@ -2,16 +2,22 @@
 
 训练支持本地动作与断点恢复，参数由 frozen dataclass 经 tyro 暴露。
 回放与导出分别由 runtime/viewer.py 和 runtime/export.py 执行。
+帮助页按终端显示列宽排版，避免中文宽字符越过边框。
 """
 
 from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
+import unicodedata
+from collections.abc import Generator
+from contextlib import contextmanager
 from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Annotated, Literal
+from unittest.mock import patch
 
 import tyro
 
@@ -45,8 +51,8 @@ class ExportCmd:
 
     # 含 config.json 与 actor.pt 的检查点目录。
     checkpoint: Path
-    # 单文件 ONNX 的输出路径。
-    out: Path
+    # 单文件 ONNX 路径；省略时写入运行目录的 exports/actor-迭代号.onnx。
+    out: Path | None = None
     # 对照 PyTorch Actor 与原始动作库执行 CPU 数值自检。
     verify: bool = False
 
@@ -58,6 +64,43 @@ Command = (
 )
 
 
+@contextmanager
+def _unicode_help() -> Generator[None]:
+    """局部适配 tyro 1.0 的字符计数排版，解析结束或退出时恢复原渲染器。"""
+    # tyro 暂无公开字宽回调；兼容逻辑只在本次解析期间生效。
+    from tyro import _fmtlib
+
+    original_render = _fmtlib._Text.render
+    ansi = re.compile(r"\x1b\[[0-9;]*m")
+    padding = re.compile(r" +(?=(?:\x1b\[[0-9;]*m)*$)")
+
+    def cell_width(text: str) -> int:
+        return sum(
+            0 if unicodedata.combining(char) else 2 if unicodedata.east_asian_width(char) in "WF" else 1
+            for char in ansi.sub("", text)
+        )
+
+    def text_width(text: _fmtlib._Text) -> int:
+        return cell_width(text.as_str_no_ansi())
+
+    def render(text: _fmtlib._Text, width: int | None = None) -> list[str]:
+        if width is None:
+            return original_render(text)
+        wrap_width = width
+        while True:
+            # 沿用 tyro 的分词与颜色，只收紧换行预算并按实际列宽补空格。
+            lines = [padding.sub("", line) for line in original_render(text, wrap_width)]
+            widths = [cell_width(line) for line in lines]
+            overflow = max(widths, default=0) - width
+            if overflow <= 0 or wrap_width <= 1:
+                return [line + " " * max(0, width - cells) for line, cells in zip(lines, widths, strict=True)]
+            wrap_width = max(1, wrap_width - (overflow + 1) // 2)
+
+    with patch.object(_fmtlib._Text, "__len__", text_width), patch.object(_fmtlib._Text, "render", render):
+        yield
+
+
+@_unicode_help()
 def parse_command(arguments: list[str]) -> TrainCmd | PlayCmd | ExportCmd:
     """先读取恢复配置作为 tyro 默认值，确保显式参数包括默认值都可覆盖。"""
     if arguments[:1] == ["train"]:

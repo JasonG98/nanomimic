@@ -39,18 +39,22 @@ nanomimic/
 │  │  └─ imagine.py       目标窗口 + 奖励 + 软终止 + 想象 rollout
 │  ├─ training/
 │  │  ├─ train.py         Collector、Trainer 与标量日志
+│  │  ├─ curves.py        已记录标量的无窗口曲线绘制
 │  │  ├─ learning.py      世界模型拟合与策略改进
 │  │  ├─ optim.py         Muon / Adam 分组、梯度裁剪与冻结
 │  │  ├─ config.py        训练配置、JSON 与恢复配置
 │  │  └─ checkpoints.py   检查点保存与恢复
 │  ├─ runtime/
+│  │  ├─ paths.py         产物目录、旧检查点路径兼容与 JSON 原子写入
 │  │  ├─ sim.py           mjlab 适配
 │  │  ├─ motion.py        本地 NPZ 动作文件校验
 │  │  ├─ export.py        ONNX 导出与 CPU 一致性自检
 │  │  └─ viewer.py        回放与世界模型闭环虚影
 │  └─ cli.py              train / play / export
 ├─ tests/          CPU 可跑的单测；tests/fixtures/ 存对拍夹具
-├─ tools/          make_fixtures.py：在装有参考仓库的环境里生成夹具
+├─ tools/          生成夹具、转换动作、评估、绘图与迁移旧目录
+├─ data/           本地原始动作、逐段处理结果与合并缓存（不入 Git）
+├─ runs/           时间戳运行、检查点、指标、评估与导出（不入 Git）
 ├─ docs/
 │  ├─ SPEC.md      本规格
 │  └─ NOTES.md     实测数据与和参考仓库的差异记录
@@ -90,6 +94,7 @@ J 为关节数（G1 是 29），动作维度 A = J，E 为并行环境数。
 - Obs 含 full_state、goal、sensor（干净的 proprio）。
 - robot（RobotSpec）：关节名、默认关节位置、软限位、动作缩放与偏置、控制步长 dt、body 名、锚点 body、FK 所需的父子关系、关节轴与固定旋转，以及软终止的两个阈值（取自任务配置里 anchor_pos 与 anchor_ori 终止项）。
 - motion（Motion）：预计算的参考张量 body_pos_w、body_quat_w、body_lin_vel_w、body_ang_vel_w（[T, B, ·]）、joint_pos、joint_vel（[T, J]）、各 clip 末帧索引、总帧数。动作文件用本地 npz 路径加载。
+- 本地 LAFAN1 目录：原始 CSV 为 `data/raw/lafan1/g1/`，逐段 NPZ 为 `data/processed/lafan1-g1-v1/clips/`，合并缓存为 `data/cache/lafan1-g1-v1/all.npz`；转换工具支持显式覆盖三类路径。目录整理不修改 NPZ 数值契约。
 - ctx_spec：三个随机化通道及取值范围；read_ctx() 返回归一化到 [-1, 1] 的 [E, C]。
 
 ### 4.2 models/model.py
@@ -139,14 +144,17 @@ J 为关节数（G1 是 29），动作维度 A = J，E 为并行环境数。
 
 ### 4.7 training/
 
-- `train.py` 放 Collector、Trainer、训练入口和标量日志；`learning.py` 放 WorldModelFitter、PolicyImprover、监督损失与 GAE；`optim.py` 放优化器分组和裁剪；`config.py` 放 frozen dataclass 与配置读写；`checkpoints.py` 放检查点保存和恢复。
+- `train.py` 放 Collector、Trainer、训练入口和标量日志；`curves.py` 只负责已记录标量的无窗口曲线绘制；`learning.py` 放 WorldModelFitter、PolicyImprover、监督损失与 GAE；`optim.py` 放优化器分组和裁剪；`config.py` 放 frozen dataclass 与配置读写；`checkpoints.py` 放检查点保存和恢复。
 - Trainer 只做排程，三个阶段是三个小对象：Collector（用 Actor 加噪声在真实仿真里走一步，写缓冲，向归一化器提交新数据，对 sensor 加噪声）、WorldModelFitter、PolicyImprover。
 - 每次迭代：Collector 走一步；训练次数 = replay_ratio × num_envs / (wm.num_batches × wm.batch × wm.horizon)，小数部分累积到下次；每次训练先 fit 再 improve。
 - WorldModelFitter：取 num_batches 个窗口，从首帧开始用真实动作自回归 rollout horizon 步，用 loss_groups 加权平方误差，梯度范数裁剪到 1.0。
 - PolicyImprover：从 sample_start 取起点调用 imagine；Actor 的损失 = −（折扣回报 + 末端 bootstrap）的均值；Critic 用 GAE（lambda 0.95）回报训练，5 轮 × 4 个 minibatch；梯度做范数裁剪并加逐元素裁剪 0.1；Adam beta2 取 0.95。
 - 优化器：每个 MLP 的中间隐藏层权重用 torch.optim.Muon，其余参数（首末层、偏置、LayerNorm）用 Adam；学习率 2e-4。
 - 编译：对 rollout 与损失函数用 torch.compile；不要手写 CUDA graph。
-- 检查点：每 1000 次迭代保存 world_model.pt、actor.pt、critic.pt（含归一化状态）与 config.json（带 schema_version），支持 --resume；日志每 10 次迭代打印，W&B 是可选的 Sink（只记标量）。
+- 检查点：每 1000 次迭代保存 world_model.pt、actor.pt、critic.pt（含归一化状态）与 config.json（带 schema_version），支持 --resume；日志每 100 次迭代打印，W&B 是可选的 Sink（只记标量）。
+- 输出：每次启动在 `--output` 根目录下创建北京时间 `YYYYMMDD_HHMMSS` 子目录，同秒重名时加序号。启动时打印实际目录，每轮原始指标写入 `metrics.jsonl`；曲线 `training-curves.png` / `training-curves.svg` 与检查点同周期更新，正常结束也补存检查点与曲线。检查点配置保留输出根目录，续训在该根目录下创建新运行目录，指标只记录本次续训的迭代，不拼接历史数据。
+- 运行内布局：根目录在进入训练循环前保存 `config.json` 与 `run.json`（schema_version、创建时间、续训来源）；检查点位于 `checkpoints/迭代号/`，完整保存后更新 `checkpoints/index.json` 的 latest 字段；默认评估产物位于 `evaluations/`，默认 ONNX 位于 `exports/actor-迭代号.onnx`，显式输出参数优先。`runtime/paths.py` 统一目录定位与 JSON 原子写入，旧的平铺检查点参数继续兼容。本阶段保留全部检查点。
+- 旧目录由 `tools/migrate_layout.py` 迁移，默认只展示计划，`--apply` 才执行。移动前检查全部目标冲突，移动后逐文件核对身份与大小；不改写历史配置、评估或权重。旧动作路径保留相对软链接；旧运行名称保留，混有时间戳运行的根目录将平铺产物收进 legacy/。执行前计划与完成记录位于 `data/migrations/`。
 
 ### 4.8 runtime/export.py
 
@@ -165,16 +173,16 @@ J 为关节数（G1 是 29），动作维度 A = J，E 为并行环境数。
 
 ### 4.10 cli.py
 
-train；play --checkpoint [--viewer native|viser]；export --checkpoint --out [--verify]。
+train；play --checkpoint [--viewer native|viser]；export --checkpoint [--out] [--verify]。
 play 可用 --device 指定设备、--num-steps 指定有限回放步数；默认使用一个环境，
 有 CUDA 则用 cuda:0，否则 CPU。macOS 原生入口自动经 mjpython 启动。
 
 ## 5. 开发任务
 
-当前推进安排：T0、T2–T5 已完成，T6 实现与 CPU 验证已通过；本轮先做 T8 的实现与
-CPU 数值验收，再做 T9 的实现与 Mac CPU 实测。T1、T6 GPU 部分、T7 和 T8 完整动作
-闭环且不摔倒的 sim2sim 仍待完成；T8 最终 sim2sim 须使用 T7 得到的合格策略。
-CPU 试跑检查点仅验证导出和回放功能，不代替训练效果验收。
+当前状态：T0–T6 已通过验收（含 T1 与 T6 的 RTX 5060 Ti GPU 实测）；T8 的实现与
+CPU 数值验收、T9 的实现与 Mac CPU 实测已完成。T7 已开始真实动作收敛训练，
+效果验证和参考阈值确认尚未完成；T8 最终完整动作闭环且不摔倒的 sim2sim
+须使用 T7 得到的合格策略。CPU 试跑检查点仅验证导出和回放功能，不代替训练效果验收。
 
 | 任务 | 内容 | 验收 |
 |---|---|---|
@@ -201,7 +209,8 @@ CPU 试跑检查点仅验证导出和回放功能，不代替训练效果验收�
 
 | 项 | 值 |
 |---|---|
-| num_envs | 2048（T1 实测后可调） |
+| num_envs | 4096 |
+| 训练上限 | 100000 次迭代 |
 | 缓冲 | 每环境 1000 步 |
 | replay_ratio | 16 |
 | 世界模型 | lr 2e-4，batch 2048，窗口 8，每次 10 个 batch，隐藏层 3 × 2048，梯度范数裁剪 1.0 |
@@ -209,7 +218,7 @@ CPU 试跑检查点仅验证导出和回放功能，不代替训练效果验收�
 | Critic | 256、128；5 轮 × 4 个 minibatch |
 | 精度 | fp32 参数 + TF32 矩阵乘 |
 | history_length | 取参考仓库的默认值 |
-| 日志与检查点 | 每 10 次迭代打印，每 1000 次迭代保存 |
+| 日志、检查点与曲线 | 每 100 次迭代打印，每轮记录原始指标；每 1000 次迭代保存检查点并刷新曲线，正常结束时补存 |
 
 ## 8. 风险与待确认
 

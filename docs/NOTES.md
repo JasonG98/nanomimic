@@ -1,324 +1,374 @@
-# NOTES
+# 实测与决策记录
 
-记录实测数据、与参考仓库（HybridRobotics/supermimic）的差异、以及等待用户确认的事项。
-按任务追加，最新内容放在最前面。
+规格以 [SPEC.md](SPEC.md) 为准；本文件只保留实测、关键选择、参考差异与待办。
+2026-11-18 按主题合并历史记录；后续更新归入对应主题并注明日期，过期状态由新结论替代。
+下列运行数据均来自原记录，不表示整理时重新执行了训练或核验了后台进程。
 
-## 2026-11-16 · T6 编译耗时复查：已确认大图规模，未确认框架缺陷
+## 当前状态与待办
 
-- 此前完成的是编译边界调整和 T6 验收，并未定位首次半小时中的具体编译器热点。
-  「编译修复」应理解为调整不合适的编译范围，不能据此宣称已修复或已排除
-  PyTorch 内部 BUG，也不能把改后 178 秒与原路径的中断时间当作受控速度比。
-- 复查原运行留下的 Inductor 产物：世界模型前向 / 反向源码在 21:50:16–21:50:30
-  生成；想象前向模块在 **22:08:02** 生成，大小 **9,801,891 字节、96,333 行**，
-  定义 **338** 个 Triton kernel，含 **6681** 个 Triton 调用点。
-  22:08:20 已生成 Actor 回报损失的前向 / 反向模块，说明原运行确有编译及执行进展。
-  截至原运行中断，未找到对应的整段想象反向模块；缺少原阶段 trace 和调用栈，
-  不能进一步断言具体停在反向编译的哪个 pass。产物文件时间差不是精确的分阶段计时。
-- 新增一次性 CPU 诊断：使用默认网络、B=2、原有 checkpoint，整段编译边界保持原样；
-  自定义 backend 只统计 Dynamo FX 图，再返回 `gm.forward`，**不运行 Inductor**。
-  计入 checkpoint 子图，1 / 4 / 32 步的 FX 节点分别为 **4224 / 16149 / 127449**，
-  每档均只有一个编译区域。这直接确认时间循环被展开成单个大图；每步的 30 body FK、
-  目标、网络、奖励、软终止和传感器计算都会被重复纳入。
-- 上述诊断只用于图结构归因：B=2 不替代默认 GPU 验收；图捕获加 CPU 前向的耗时
-  不代表 GPU 完整编译耗时。脚本和结果位于 **`runs/t6-compile-audit/`**，不入 Git。
-- 最终逐步方案的原始日志有 Dynamo 编译汇总 **119.3145 秒**，其中代码生成指标
-  **61.8799 秒**、融合调度 **23.5295 秒**、kernel 自调优 **35.6922 秒**。
-  指标存在父子嵌套，不能相加。这些是最终方案的数据，不能用于补算原半小时的阶段分布。
-- 当前有证据的工程结论：**原编译边界把 32 步重复计算展开成约 12.7 万节点，
-  编译范围过大；使用逐步区域编译可完成原验收。** Python 循环展开导致大图和编译
-  开销，是 [PyTorch 控制流文档](https://docs.pytorch.org/docs/main/higher_order_ops/index.html)
-  已说明的限制；[区域编译](https://docs.pytorch.org/tutorials/recipes/regional_compilation.html)
-  是官方提供的应对方式。不能把半小时简单视为模型必须付出的固定成本。
-- **仍未确认**：原路径是否还触发特定的 Inductor 性能缺陷、具体最慢 pass、
-  相同空缓存下的整段 / 逐步耗时比。撤回的 `nested_compile_region` 方案有独立的
-  4 步梯度对照失败；尚未区分随机数处理、调用方式与框架缺陷，不能称为已确诊的
-  PyTorch 正确性 BUG，也不能用它解释更早发生的整段编译耗时。
-- 本次只做归因复查和记录修正，没有再次修改训练源码、默认配置或测试，
-  没有推进 T7，没有提交或推送；T6 既有 50 次 GPU 验收及 61 项测试结论不变。
-
-## 2026-11-16 · T6 GPU 50 次迭代（验收通过）
-
-### 实测结果
-
-- RTX 5060 Ti 16GB，默认 **2048 环境**、每环境 **1000 步缓冲**、replay_ratio=16；
-  世界模型保持 3×2048、batch=2048、horizon=8、每轮 10 个 batch；策略保持
-  batch=2048、想象 32 步、逐步 checkpoint；Actor / Critic、优化器与学习率均不缩小。
-  编译保持开启，后端为 **Inductor**，参数 fp32、矩阵乘 TF32。
-- 使用 `tests/fixtures/motion.npz`、seed=0，完成 **50 次迭代**，退出码 **0**。
-  检查点为 **`runs/t6-gpu/00000050`**；保存配置与只覆盖动作路径、迭代数、输出路径
-  的 `TrainConfig` 默认值逐项相等。累计 **10 轮 fit / improve**，排程余额为 0；
-  世界模型 / Actor / Critic 的 Adam 更新计数分别为 **100 / 10 / 200**。
-- 全程没有非有限损失或梯度异常。CPU 加载三个检查点，模型与归一化共 **74** 个
-  张量、优化器共 **162** 个张量全部有限；三个检查点迭代号均为 50。
-
-| 第 50 次迭代指标 | 值 |
+| 任务 | 最近结论 |
 |---|---|
-| 世界模型损失 | 0.136690 |
-| 策略损失 | -1.41326 |
-| Critic 损失 | 0.0411164 |
-| 仿真奖励 | 0.0605439 |
-| 重置比例 | 0.019043 |
-| PyTorch 已分配 / 保留显存峰值 | 2.98491 / 3.43094 GB |
-| **整卡采样峰值** | **4610 MiB = 4.502 GiB = 4.833935 GB < 15 GB** |
+| T0–T6 | 已通过，包括 2026-11-16 的 T1、T6 RTX 5060 Ti 实测；T6 GPU 使用当时的 2048 环境配置 |
+| T7 | 已启动真实动作训练；已记录的 5000 次迭代评估为 53/64 成功，效果尚未验收 |
+| T8 | 实现与 CPU 数值验收完成；完整动作闭环且不摔倒的 sim2sim 待 T7 合格策略 |
+| T9 | 实现、Mac CPU 回放及虚影对齐实测完成；试跑策略不代表训练效果 |
 
-- 独立终端每 **200 ms** 采样整卡显存，共 **1165** 个样本，覆盖训练启动前至
-  退出后；峰值包含 PyTorch、Warp、MuJoCo 和用户允许保留的桌面占用，未扣基线。
-  最初 10 个样本均为 **618 MiB**，最后 10 个均为 **689 MiB**；桌面占用有波动。
-  每秒的计算进程记录包含训练 PID 34597，以及已核实的 VS Code GPU 进程 23261、
-  Chrome GPU 进程 36965，没有其他训练任务。200 ms 采样不保证捕获更短的瞬时峰值。
-- 最终运行时间为北京时间 **22:36:41–22:39:40，共 178.42 秒**，包含初始化、编译、
-  训练与保存；使用已有编译缓存，不把这个数字当作冷启动耗时或稳定训练吞吐。
-  增加的 `TORCH_LOGS=dynamo` 仅用于确认编译阶段，未改训练配置。
-- 环境同 T1：Python 3.13.15、torch **2.15.0+cu132**、PyTorch CUDA **13.2**、
-  驱动 **615.71.09** / CUDA UMD **13.4**；mjlab 1.6.1、MuJoCo / MuJoCo Warp
-  3.11.0、Warp 1.19.0（其启动日志报告 CUDA Toolkit / Driver 13.4）。
+尚未完成的事项：
 
-### 编译修复与回归验证
+- **效果阈值待用户确认**：没有可用的同段动作 SuperMimic 参考检查点或评测结果；
+  须按同一协议比较完整成功率和平均误差，再提交阈值，不宣称已达到参考水平。
+- **默认规模确认保留**：2026-11-17 已将 `num_envs=4096`、`max_iterations=100000`
+  写入配置、SPEC 与 README；原记录注明需用户确认，本次整理不将其改为已确认。
+- **待用户在 RTX 5060 Ti 上运行**：4096 环境完整训练峰值低于 15 GB 的验收，
+  新布局下第 1000 轮保存与第 1001 轮结束补存，以及 T7 后的 T8 最终 sim2sim。
+  2048 环境的 T6 数据不能代替新默认规模验收；命令见文末。
 
-- 原实现把整个 32 步想象循环交给 `torch.compile` 展开；首次运行约 30 分钟仍未
-  输出第 10 次迭代。SIGINT 未及时退出，中断阶段观测到进程 RSS 约 18 GiB，
-  随后只对自建训练进程发送 SIGTERM，退出码 143；该次没有检查点，不计为验收通过。
-- 改为编译 `imagine_step`，由原 Python 时间循环逐步调用；每步仍使用原有
-  checkpoint，全程保留跨步梯度、RNG 重算语义、目标 / 奖励 / 软终止公式。
-  世界模型 rollout 与损失、Actor / Critic 损失继续编译，没有关闭编译或改用 eager
-  后端来取得 GPU 验收。该选择采用 PyTorch 文档的
-  [区域编译方式](https://docs.pytorch.org/tutorials/recipes/regional_compilation.html)。
-- 探索中曾尝试 `nested_compile_region`，2 步对照通过，但新增的 4 步对照发现
-  梯度最大绝对差 **0.003919743**，超过原阈值；该方案及其输入复制均已撤回，
-  对应 GPU 运行主动终止、不计验收。最终实现使用普通 `torch.compile`，不依赖该接口。
-- 将既有策略编译对照参数化为 **2 / 4 步**，覆盖重复单步的复用、动力学冻结与
-  Critic 的 5×4 次更新。最终两种步数下，编译与未编译的 Actor 梯度均满足原有
-  `atol=1e-6, rtol=1e-5`；checkpoint 开关、T3/T5 对拍等既有测试全部通过。
-- 最终 **ruff、格式检查（43 文件）、pyright（0 errors / warnings）、完整 pytest
-  61 passed，5 warnings，24.36 秒**通过。测试警告仍为已记录的 TorchScript /
-  旧 ONNX API 弃用提示；GPU 日志另有 Triton FP fusion 默认值及 SM 数量提示，
-  没有 CUDA 错误或接触容量不足提示。夹具和所有误差阈值均未修改。
+## 环境与基础选择（2026-11-15–16）
 
-### 状态与复现
+| 环境 | 已记录版本与设备 |
+|---|---|
+| 初期 CPU 开发 | macOS Darwin 27.2.0、M1 Pro / arm64；Python 3.13.7、torch 2.15.0，无 CUDA |
+| T1 / T6 GPU | Linux x86_64、i7-14700KF、RTX 5060 Ti 16GB（16311 MiB、sm_120）；Python 3.13.15、torch 2.15.0+cu132、PyTorch CUDA 13.2 |
+| GPU 驱动与仿真栈 | 驱动 615.71.09、CUDA UMD 13.4；mjlab 1.6.1、MuJoCo / MuJoCo Warp 3.11.0、Warp 1.19.0（启动日志 Toolkit / Driver 13.4） |
+| 初期工具与导出栈 | uv 0.13.8、tyro 1.0.17、onnx 1.23.2、onnxruntime 1.32.0、pytest 9.2.0、ruff 0.17.5、pyright 1.1.414 |
 
-- **T6 GPU 验收通过；保留 `num_envs=2048`。** 本次仅调整想象 rollout 的编译
-  边界并增强回归验证，没有数学、默认超参数或验收标准的 SPEC 偏离，
-  无需用户确认的偏离项。此前 T6 GPU「待用户运行」记录是历史状态，以本条为准。
-- 本次未推进 T7 或 T8 最终 sim2sim；50 次合成动作训练仅验收稳定性与资源，
-  不代表收敛效果。下一阶段仍为 T7 的真实动作收敛训练和参考阈值比较，
-  最终 sim2sim 须使用 T7 合格策略。用户已在本轮明确授权提交；推送未授权，本次不执行。
-- 最终训练日志、前后进程清单、检查点 / 优化器核验、完整测试日志和统计汇总在
-  **`runs/t6-gpu-observation/`**；整卡原始采样为 **`runs/t6-gpu-vram-mib.csv`**。
-  前两次未通过的尝试分别保留为 `initial-*`、`nested-*`；所有运行产物沿用忽略规则。
+- **Python 退回 3.13**：mjlab 1.6.1 声明 `>=3.10,<3.14`；uv 解析忽略该上界，
+  因而 `uv sync` 成功不能证明支持 3.14。3.14 功能试跑虽正常（含 ONNX 误差 1.2e-7），
+  但 torch 将其 `jit.script` 标为不支持，mjlab 仍有 28 个相关装饰函数。
+  升级须同时满足 mjlab 放开上界、torch 支持该路径；退回符合 SPEC 第 1 节。
+- mjlab 放入默认依赖；其传递依赖 `tensordict` 不在项目代码中使用，W&B 只作可选标量 Sink。
+  uv 默认清华索引写入 `pyproject.toml`，已在干净配置下验证，避免依赖机器全局设置。
+- ruff 因中文全角标点关闭 RUF001/002/003；pyright 使用 standard，工具脚本同样纳入检查。
+  MuJoCo 动态导出缺少类型桩时，仅对工具内对应单行导入精确抑制类型错误。
+- **2026-11-16 用户确认五目录组织**：目标与奖励合入 `rollout/imagine.py`，
+  标量日志合入 `training/train.py`，已同步 SPEC、AGENTS 与 README。
+  迁移前后均 47 项测试通过；20 个原模块在归一化导入并移除说明字符串后 AST 一致，
+  夹具逐字节一致。导入规则递归扫描，mjlab 例外仅为 `runtime/sim.py`、`runtime/viewer.py`。
 
-复现（另开终端先启动采样，训练退出后 Ctrl+C；重复运行须更换输出与采样文件名）：
+## 仿真、数学与训练契约（2026-11-16）
 
-```bash
-nvidia-smi --id=0 --query-gpu=memory.used --format=csv,noheader,nounits \
-  -lms 200 > runs/t6-gpu-vram-mib.csv
-```
+### T2：仿真适配与夹具
 
-```bash
-TORCH_LOGS=dynamo uv run nanomimic train \
-  --motion-file tests/fixtures/motion.npz --device cuda:0 \
-  --max-iterations 50 --output runs/t6-gpu
-```
+- 只读参考为 `../supermimic`，提交 `abc124c1bd5976341034668af3d12c087f2f1f55`；
+  只取常量、生成真值、核对契约，没有复制其架构或使用私有 mjlab fork。
+- CPU 随机动作 **2 环境 × 100 步**通过，3 次自动重置，步进含检查耗时 3.17 秒。
+  状态 / 目标 / sensor / ctx 分别为 `[2,71]`、`[2,670]`、`[2,93]`、`[2,33]`；
+  值有限，ctx 在 `[-1,1]`。机器人为 29 关节、30 树 body、14 跟踪 body，
+  锚点 `pelvis`，dt=0.02 秒，软终止阈值 0.25 / 0.8。
+- 发布版采样模式确为 `adaptive`；薄子类只把动作推进改成片段末帧钳位，保留采样与失败率更新。
+  NPZ 的可选 `motion_ends` 是右开端点，读入转为包含式 `clip_ends`；缺省视为单片段。
+  文件须含完整 30 body，严格校验字段、形状、有限性、单位四元数及 50 Hz 帧率，不自动重采样。
+- “干净” sensor 仍含域随机化编码器偏置，关节位置相对默认姿态；逐帧噪声统一另加。
+  ctx 顺序为脚摩擦 1、质心偏移 3、编码器偏置 29。质心先减名义 `body_ipos` 再归一化；
+  参考直接归一化绝对位置可能越界，本项目按 SPEC 修正，不用 clamp 掩盖问题。
+- `step()` 的 done 描述旧回合，done 行观测属于自动重置后的新回合，上一动作清零；
+  返回值均为快照。缓冲不将新回合观测当成旧回合后继；写状态后测试显式刷新观测缓存。
+- 夹具由 `tools/make_fixtures.py` 生成，96 帧、两个合成片段，仅作接口与数值验收。
+  积分按 SPEC 使用 `substep_coeff=1.0`，参考 decimation=4 的工厂默认 0.625。
+  发布版缺少私有 FK，故以 MuJoCo `mj_forward` / `mj_jac` 独立生成 body 原点世界系速度真值。
+  manifest 含种子、版本、参考提交与源码 / 产物 SHA-256；独立重生成全部逐字节一致，未手改夹具。
 
-## 2026-11-16 · T1 RTX 5060 Ti 实测（GPU 验收通过）
+### T3–T5：数值、历史与可微想象
 
-### 环境与测量口径
+fp32 对拍最大绝对误差如下，统一验收 `atol=1e-5, rtol=0`：
 
-- 本机 NVIDIA GeForce RTX 5060 Ti 16GB（sm_120）；`nvidia-smi` 报告整卡
-  16311 MiB，驱动 / NVIDIA-SMI 版本 **615.71.09**，CUDA UMD **13.4**。
-  PyTorch **2.15.0+cu132**、`torch.version.cuda=13.2`，CUDA 可用；Warp 启动
-  日志报告 CUDA Toolkit / Driver 均为 **13.4**。这些版本分别记录，不混作同一项。
-- Linux x86_64、Intel Core i7-14700KF、Python 3.13.15；mjlab 1.6.1、
-  MuJoCo / MuJoCo Warp 3.11.0、Warp 1.19.0。未安装私有 fork，未改参考仓库。
-- 严格沿用下方 T1 的两条 `tools/check_sim.py` 命令，同一份 96 帧合成动作、
-  seed=0，每档独立进程运行 1000 个控制步，控制步长 0.02 秒。
-  吞吐为 `num_envs×1000/耗时`，包含随机动作生成、形状 / 有限性 / 上下文
-  检查及重置统计；计时从构造和 reset 后开始，首尾均同步 CUDA。
-  未增加额外预热，未去掉检查，也不把该结果当成纯物理或训练吞吐。
-- 在独立终端用 `nvidia-smi` 每 **200 ms** 采样整卡显存，从被测进程启动前
-  持续到退出后，包含 PyTorch、Warp、MuJoCo 及桌面占用。另每秒记录计算进程；
-  两档期间分别仅有验收进程 PID 22597 / 22831，没有其他计算任务。
-- 用户明确选择保留桌面应用并计入基线；实际测量前两档基线分别为
-  **404–405 MiB**、**405–406 MiB**（各取最初 10 个样本），退出后约 403–404 MiB。
-  下表峰值未扣基线，属于 200 ms 采样到的最大值，不保证捕获更短的瞬时峰值。
+| 项目 | 最大绝对误差 |
+|---|---|
+| represent、loss_groups、Bryson 权重 | 0 |
+| 积分 aux / rep | 1.20e-7 / 2.99e-7 |
+| FK 位置与四元数 / 线速度 / 角速度 | 4.18e-7 / 2.91e-7 / 8.05e-7 |
+| 奖励 / 软终止 / 目标窗口 | 2.33e-9 / 0 / 2.99e-7 |
 
-### 实测结果
+- RunningNorm 用合并批次矩、标准差下限 0.01；只由采集阶段显式更新，前向、评估与
+  checkpoint 重算均不更新，均值 / 方差 / 计数入 `state_dict`。零角速度积分、FK 与动作梯度均通过。
+- HistoryRing 为帧主序、最旧在前；重置行用同一次噪声填满历史，函数式更新保留梯度。
+  回放槽 t 存 `s_t、sensor_t、a_t、done_t`；L 帧窗口只检查前 L−1 条连接无 done。
+  起点历史包含当前帧，缺失或已覆盖部分以同回合最早可用帧填充并标 False；
+  上一动作取 sensor 尾部。采样按环境分层，合法性与历史边界向量化计算。
+- 沿用参考 H=1、32 维 tanh 潜变量；Actor 编码器与解码器均为 2048/1024/512/256，
+  Critic 为 256/128。CPU 测试使用小网络，不改变默认网络。
+- 预测后对当前参考计分，再推进动作时间；末端 Critic 用推进后的目标。
+  旋转误差 acos 在 ±1 附近钳位 1e-7；倾斜误差为投影重力 z 分量差；
+  价值仅钳上界 `5×dt/(1−gamma)`，允许负值；回报的奖励乘 `s_t`，bootstrap 乘 `s_H`。
+- 想象从已有带噪历史开始，后续每步只加一次统一 sensor 噪声，不重复施加编码器固定偏置。
+  4 步、H=3 的 Actor 梯度有限且非零；checkpoint 开关奖励严格相同，梯度满足
+  `atol=1e-6, rtol=1e-5`，不污染归一化计数。
 
-| num_envs | 控制步数 | 含检查耗时 | 环境步数/秒 | 自动重置次数 | 整卡峰值 MiB | 整卡峰值 GiB |
+### T6：训练与恢复的 CPU 验证
+
+- Collector → WorldModelFitter → PolicyImprover；训练额度按
+  `replay_ratio×num_envs/(num_batches×batch×horizon)` 累积，含预热期余额。
+  世界模型取 horizon+1 个状态预测 horizon 步；Actor 更新冻结动力学和 Critic 参数，保留输入导数。
+- 中间 Linear 权重用 Muon，其他参数用 Adam，分组无重复或遗漏；
+  Muon 沿用 `match_rms_adamw`，规格未定权重衰减，选择 0，避免额外正则项。
+  Critic 的 GAE lambda=0.95，实际执行 5×4 个 minibatch；梯度裁剪沿用 SPEC。
+- 独立解析标签、固定种子、小网络 CPU 60 次更新：世界模型损失
+  **0.706855 → 0.00141098（下降 99.80%）**。
+  真实 mjlab 2 环境、H=3、batch/horizon=2，从 4 次恢复到 50 次、累计 25 轮 fit/improve；
+  `aot_eager` 与 Inductor 均完成，参数与归一化有限。Inductor 最终 WM/Actor/Critic 损失为
+  0.175211 / -0.493881 / 0.00105201，只证明流程可运行。
+- 编译 / 未编译梯度满足 `atol=1e-6, rtol=1e-5`，策略更新前后动力学状态严格不变。
+  检查点四文件保存归一化、优化器、RNG、迭代号和排程进度，临时目录完成后重命名，拒绝覆盖。
+- 续训先读保存配置，再应用显式 CLI 参数；显式学习率覆盖不被优化器状态覆盖。
+  参数、统计量与优化器张量恢复一致；仿真和回放重新初始化、预热，不承诺逐步轨迹复现。
+
+## GPU 实测与编译边界（2026-11-16）
+
+T1 / T6 均用上述 RTX 5060 Ti 环境；每 200 ms 采样整卡显存，包含桌面、PyTorch、
+Warp、MuJoCo，未扣基线；采样峰值不保证捕获更短瞬时峰值。原始产物不入 Git。
+
+### T1：两档仿真规模
+
+同一份 96 帧合成动作、seed=0、每档独立进程。构造与 reset 后开始计时，首尾同步 CUDA，
+含随机动作、契约检查与重置，无额外预热，不等同纯物理或完整训练吞吐。
+
+| 环境数 | 控制步数 | 耗时 | 环境步数/秒 | 重置次数 | 整卡峰值 MiB / GiB |
+|---|---|---|---|---|---|
+| 2048 | 1000 | 17.84 秒 | 114795.9 | 48238 | 948 / 0.926 |
+| 4096 | 1000 | 28.81 秒 | 142176.8 | 96324 | 1247 / 1.218 |
+
+两档退出码均为 0，无 CUDA 或接触容量错误。基线分别为 404–405 / 405–406 MiB，
+采样 381 / 608 点；2048 首次触发 Warp 编译，4096 使用缓存，未重复取最好值。
+4096 吞吐高 23.85%、峰值多 299 MiB；当时为完整训练留余量保留 2048，后续默认值见数据节。
+环境、日志、CSV 与汇总在 `runs/t1-gpu/`；动作夹具 SHA-256 为
+`c4030977382668861961dddc3879404d7bbc448417d2dae4b3d94d9b963f988d`。
+
+### T6：2048 环境、50 次迭代
+
+默认网络、batch、horizon、1000 步缓冲、replay_ratio=16、逐步 checkpoint、Inductor、
+fp32/TF32，seed=0，使用合成夹具；只覆盖动作、迭代数、输出路径。退出码 0，完成 10 轮
+fit/improve、排程余额 0；WM/Actor/Critic 的 Adam 更新计数为 100/10/200。
+三个检查点含归一化的 74 个模型张量、162 个优化器张量全部有限，无 NaN 或梯度异常。
+
+| 第 50 次指标 | 值 |
+|---|---|
+| WM / Actor / Critic 损失 | 0.136690 / -1.41326 / 0.0411164 |
+| 仿真奖励 / 重置比例 | 0.0605439 / 0.019043 |
+| PyTorch 已分配 / 保留峰值 | 2.98491 / 3.43094 GB |
+| 整卡采样峰值 | **4610 MiB = 4.502 GiB = 4.833935 GB < 15 GB** |
+
+1165 个整卡样本覆盖启动前至退出后，前后基线 618 / 689 MiB，已核实无其他训练任务。
+北京时间 22:36:41–22:39:40，耗时 178.42 秒含初始化、编译、训练与保存，使用已有缓存，
+不代表冷启动或稳定吞吐。检查点现位于 `runs/t6-gpu/checkpoints/00000050/`，日志与核验在
+`runs/t6-gpu-observation/`，显存原始数据为 `runs/t6-gpu-vram-mib.csv`。
+本项验收稳定性与当时规模的资源，不代表收敛效果。
+
+### 编译范围的选择与证据
+
+- 原整段 32 步编译约 30 分钟未输出第 10 次指标，RSS 约 18 GiB，最终 SIGTERM、退出 143，
+  无检查点，不计验收。改为编译 `imagine_step`，Python 循环复用，每步保留 checkpoint、
+  RNG 重算及跨步梯度；其他 rollout / 损失仍编译，未靠关闭编译通过验收。
+- 撤回 `nested_compile_region`：2 步对照通过，4 步梯度最大差 **0.003919743**，超过阈值。
+  最终普通 `torch.compile` 的 2/4 步对照均满足原梯度阈值；未确诊为框架正确性 BUG。
+- 原产物的想象前向模块为 9,801,891 字节、96,333 行、338 个 Triton kernel、6681 个调用点；
+  已有 Actor 损失前后向模块，未找到整段想象反向模块。CPU B=2、只统计 FX 图的诊断显示
+  1/4/32 步为 **4224/16149/127449 节点**，每档一个区域，证实循环展开成大图。
+  诊断在 `runs/t6-compile-audit/`，不替代 GPU 编译计时。
+- 最终方案 Dynamo 编译汇总 119.3145 秒，代码生成 / 融合调度 / 自调优为
+  61.8799 / 23.5295 / 35.6922 秒，指标嵌套不能相加。
+  证据支持缩小编译范围；原路径最慢 pass、是否存在 Inductor 缺陷、同空缓存速度比仍未确认。
+  不能把 178 秒与原中断时间当受控提速比。选择依据为
+  [PyTorch 区域编译文档](https://docs.pytorch.org/tutorials/recipes/regional_compilation.html)。
+
+## T7：真实动作训练与评估（2026-11-16）
+
+- 动作为 `lafan_run1_subject5`，11890 帧、50 Hz、237.8 秒、29 关节、完整 30 body；
+  SHA-256：`5e414d9800a0ffce26bd9667dda65ac6c711f287df77c4a5d105c32a9e1d7619`。
+  迁移后原文件保存在 `data/processed/lafan1-g1-v1/legacy/lafan_run1_subject5.npz`。
+- 真实动作 GPU 预检 2048 环境 × 100 步通过，重置 7314 次。北京时间 23:14:55、
+  代码 `17884a9` 从头启动，未恢复 T6；当时为 2048 环境、上限 1000000，其余默认，
+  每 1000 次保存。只读参考的上限同为 1000000、环境默认 4096
+  （`runners/supermimic_runner.py:72`、`scripts/train.py:28`），不代表实际收敛次数。
+- 检查点与评估现位于 `runs/t7-lafan/{checkpoints,evaluations}/`；启动命令、动作哈希、
+  进程信息、日志和显存采样在 `runs/t7-lafan-observation/`。
+  当时另有每 5000 次及最终检查点评估的监测进程，信息见 `evaluation-watcher.json`、`status.json`。
+
+### 评估协议
+
+`tools/evaluate_tracking.py` 只接受单片段；默认 seed=0、64 次并行首次尝试：
+
+- 从第 0 帧到末帧，11890 帧对应 **11889 个控制步**；关闭动作探索和初态扰动，
+  保留三项域随机化与 sensor 噪声，冻结网络与归一化，独立进程不改变训练 RNG。
+- 延长原 10 秒超时至动作结束之后，关闭自动重置；真实失败终态计入误差，
+  失败后局部重置且不再计分，提前超时算失败。reset 的命令刷新会推进到帧 1，
+  因此显式恢复帧 0，并逐步断言时间连续，拒绝跳帧或短回合被判成功。
+- step 后重算真实 body 的重锚定指标，不读旧缓存。body 位置 / 朝向为 14 个跟踪 body
+  的距离均值（m）/ 角度均值（rad）；joint 为全关节向量 L2 范数。
+  报告成功率、存活时间、完成比例、逐尝试结果、尝试期间加权误差与仅成功尝试误差，
+  无成功时后者为 null。参考策略必须用同协议再比较阈值。
+- API 依据为 mjlab 1.6.1 的 `tasks/tracking/mdp/commands.py:215,320` 与
+  `envs/manager_based_rl_env.py:358,469`；评估配置不作用于训练实例。
+
+### 已记录的阶段结果
+
+| 迭代 | 完整成功 | 平均存活秒 | 平均完成 | body 位置 m | body 朝向 rad | 锚点世界位置 m |
 |---|---|---|---|---|---|---|
-| 2048 | 1000 | 17.84 秒 | **114795.9** | 48238 | **948** | **0.926** |
-| 4096 | 1000 | 28.81 秒 | **142176.8** | 96324 | **1247** | **1.218** |
+| 1000 | 0/64 | 6.5984375 | 2.7750% | 0.1443023 | 0.7133235 | 1.5285354 |
+| 2000 | 0/64 | 38.44875 | 16.1699% | 0.1129856 | 0.5261699 | 4.5113266 |
+| 5000 | 53/64（82.8125%） | 213.334375 | 89.7192% | 0.0413590 | 0.1708915 | 3.0760728 |
 
-- 两档均以退出码 0 通过，公开观测和上下文的形状、有限性、取值范围检查全部通过。
-  日志没有接触容量不足或 CUDA 错误，只有已知的 `torch.jit.script` 弃用提示。
-- 显存分别取得 381 / 608 个样本，采样窗口为北京时间 21:40:58–21:42:14 /
-  21:42:38–21:44:40；峰值首次出现于 21:41:38.411 / 21:43:39.880。
-  2048 首次运行触发 Warp 内核编译，4096 使用已有缓存；表中均为脚本原始输出，
-  未扣除计时区间内的任何开销，也未重复运行取最好值。
-- 原始环境信息、前后进程清单、两档日志、显存 CSV、计算进程 CSV 与
-  `summary.json` 保存在 **`runs/t1-gpu/`**，沿用现有忽略规则，不入 Git。
-  动作夹具 SHA-256 为
-  `c4030977382668861961dddc3879404d7bbc448417d2dae4b3d94d9b963f988d`；
-  夹具和验收脚本均未修改。
+1000/2000 次均为任务终止、无提前超时，存活范围为 2.16–30.28 / 2.04–104.62 秒。
+5000 次仅成功尝试的 body 位置误差为 0.0408078 m，仍有 11 次失败，未达到参考水平验收。
+表中误差覆盖各自存活区间，不能只比较低误差而忽略完成比例与锚点漂移。
+原始 JSON 为 `runs/t7-lafan/evaluations/eval-00001000-seed0.json` 等。
 
-### 默认值结论与验收边界
+第 1000 次检查点已核验 200 轮更新、余额 0、74 个模型张量有限。
+截至当日 23:31:52 的 5078 个整卡样本峰值 **5535 MiB = 5.80386816 GB**（含桌面与评估），
+这是阶段观测，非整次训练最终峰值。无并行评估的 23:31:16–23:41:06 窗口共 2950 点，
+GPU 利用率均值 86.9444%、中位数 96%；不能据剩余显存直接推断扩容收益。
+`tools/plot_training.py` 已用历史日志、评估及显存 CSV 生成并目视检查
+`outputs/t7-curves/` 的训练与资源 PNG/SVG；缺失损失不补零，21 点向后均值只用于显示。
 
-- **确定保持 `num_envs=2048`**，与 SPEC 第 7 节及现有配置一致。
-  4096 的环境吞吐提高 **23.85%**，整卡仿真峰值仅增加 **299 MiB**，可作为
-  后续可选规模；但 T1 没有加载训练网络、优化器、回放缓冲或想象反向传播。
-  按当前字段和每环境 1000 步容量计算，回放张量容量约从 **1.743 GiB**
-  增至 **3.487 GiB**（仅按形状和 dtype 推算，非 GPU 实测）。因此先保留 2048
-  给完整训练留出余量，本次数据不足以据此上调训练默认值。
-- **无 SPEC 偏离，无需用户确认的偏离项。** T1 GPU 测量和默认值结论已取得；
-  用户已在本轮明确授权提交；推送未授权，本次不执行。此前记录中的 T1「待用户在
-  RTX 5060 Ti 上运行」是历史状态，以本条为准。
-- 本次未运行 T6 GPU、T7 或 T8 最终 sim2sim；默认训练显存低于 15GB 的验收
-  仍待 T6，T7 效果阈值仍须与参考实现比较后由用户确认，最终 sim2sim 须用
-  T7 合格策略。
+## 动作数据与默认规模（2026-11-17）
 
-复现命令（每档开始前在另一终端启动采样，进程退出后 Ctrl+C；4096 档更换文件名）：
+- `lvhaidong/LAFAN1_Retargeting_Dataset` 的 G1 数据实际为 **40 段** CSV（非原版 77 段），
+  已全部下载，以 mjlab `csv_to_npz` 从 30 Hz 重采样到 50 Hz 并计算 FK。
+  逐段约 755 MB；合并 **441120 帧、40 个片段、约 754 MB**，通过形状、有限性、
+  单位四元数与帧率校验。顺序为 `LAFAN1_CLIPS` 字典序，端点按帧数累加。
+- 多片段 CPU 2 环境、3 次迭代通过，采样可进入任意片段，目标窗口不跨片段。
+  合并数据超过 ONNX 15000 帧上限，导出须使用单段或裁剪；新目录见下一节。
+- 转换的局部兼容：`fallAndGetUp2_subject2` 的 body 角速度自检 fp32 最大差
+  **1.2815e-5**，CPU/CUDA 均复现。只在转换调用内包装第三方 `assert_close`：
+  先用原参数断言，仅失败且绝对差 **<1e-3** 才放过并打印差异，结束立即恢复；
+  更大误差仍报错，不改输出数据、mjlab 源码或项目数值验收阈值。
+- 新默认值为 **4096 环境、100000 次上限**，其余训练超参不变，确认状态见开头。
+  每环境 1000 步回放容量估算由 1.7433 增至 3.4866 GiB，尚非完整训练 GPU 实测。
+  每采集迭代的训练额度从 0.2 增至 0.4，同迭代数的样本量与训练工作翻倍；
+  **100000×4096 的训练量约为旧 1000000×2048 的 20%**（原记录 2% 为算术笔误）。
+  上限不代表收敛，T1 仿真吞吐增幅也不代表完整训练提速。
+
+## 运行产物、帮助与迁移（2026-11-17–18）
+
+### 日志与目录
+
+- 用户授权终端默认每 100 次打印、每 1000 次保存检查点与曲线；原始 `metrics.jsonl`
+  每轮写完整精度标量，无训练更新时不伪造损失。曲线 PNG/SVG 用 Agg，无需窗口，
+  21 点向后均值；WM/Critic 损失全为正时用对数轴，图片临时写完再替换。
+  Matplotlib 3.11.2 从传递依赖改为直接依赖 `>=3.11,<4`，未升级版本。
+- `--output` 为根目录，每次创建北京时间时间戳子目录，同秒加序号；续训也创建新目录，
+  保存配置保留输出根目录，本次指标不拼接历史。训练前保存 `config.json`、`run.json`
+  （schema、创建时间、续训来源），完整检查点保存后原子更新 latest 索引，正常结束补存并刷新曲线。
+- CPU 2 环境、5 迭代、日志/保存周期=2：终端仅 2/4 轮，原始指标完整 1–5，
+  检查点与曲线更新于 2/4/5；续训仅记录 5–8 轮，省略 output 可继承根目录。
+
+| 产物 | 现行路径 |
+|---|---|
+| 原始 / 逐段 / 合并动作 | `data/raw/lafan1/g1/` / `data/processed/lafan1-g1-v1/clips/` / `data/cache/lafan1-g1-v1/all.npz` |
+| 单次训练 | `runs/<根目录>/YYYYMMDD_HHMMSS/`；根目录保存配置、运行信息、指标与曲线 |
+| 检查点 | 运行目录的 `checkpoints/迭代号/`，四文件契约；`checkpoints/index.json` 指向 latest |
+| 默认评估 / ONNX | 运行目录的 `evaluations/` / `exports/actor-迭代号.onnx`；显式输出参数优先 |
+
+### 已执行迁移（2026-11-18 00:28:36，北京时间）
+
+- `tools/migrate_layout.py` 默认只展示计划，`--apply` 执行；预检全部冲突、拒绝覆盖，
+  先存计划、rename 后逐文件核对设备号/inode/大小，不重写数值或历史配置。
+- 完成 **343 项移动、1132 个文件**：40 CSV、40 逐段 NPZ、合并与早期单段 NPZ、
+  250 份四文件检查点、50 份评估 JSON。**82/82 数据文件 SHA-256 一致**，
+  迁移后仍有 250 份检查点，再次计划为 0 项。记录：`data/migrations/20261118_002836_533345.json`。
+- 旧 `data/lafan`、`data/lafan1_all.npz`、`data/lafan_run1_subject5.npz` 保留相对软链接；
+  早期单段置于 `legacy/`，不以后来同名转换数据替换，确保旧检查点使用原内容。
+  `runs/t6-gpu/`、`runs/t7-lafan/` 保留名称，内部迁移；`runs/g1/` 的四份平铺检查点
+  收进 `legacy/`，保留 `20261118_001006/` 指标。历史根配置原样复制最新检查点配置，
+  历史 `run.json` 仅记迁移时间，不推测启动时间或补造配置。
+- `runtime/paths.py` 统一定位与 JSON 原子写入，旧平铺检查点参数仍兼容。
+  `runs/t7-lafan/00245000` 已实测解析并 CPU 加载 245000 次 Actor，旧动作路径指向原文件；
+  `make_motion.py --list` 显示 40 段 CSV/NPZ 就绪。CPU 训练/续训、评估、ONNX 默认目录均验过。
+- 本阶段只整理目录，保留全部检查点；保留策略、最佳检查点、完整数据 manifest、
+  环境指纹与逐段评估留待后续，不在此次扩大范围。
+
+### CLI 中文帮助
+
+- tyro 1.0.17 内部按字符数计宽导致中文越框；仅在解析期间局部适配 Unicode 显示宽度、
+  换行与补空格，忽略 ANSI 宽度，保留分词/颜色，退出即恢复，无新增依赖。
+  tyro 暂无公开字宽回调，因此使用局部内部适配。
+- 六个训练配置 dataclass 统一 `#:` 单字段说明，避免普通前置注释被连续字段继承；
+  34 个叶子参数均有非空、不重复说明，五个分组分别解释，保留 tyro 自动分栏。
+- 根帮助与三子命令在 40–240 列共 24 组彩色检查通过；训练参数在
+  40/60/80/100/120/180/240 列、彩色与无色共 14 组逐项核对，说明和边框均正常。
+
+## T8 / T9：导出与回放（2026-11-16–17）
+
+2026-11-16 用户授权 T6 CPU 后先推进 T8/T9，不等待 GPU，已写入 SPEC；原验收标准保留。
+
+- ONNX 输入 `obs: fp32[1,H×93+640]`、`time_step: fp32[1,1]`；图内将 term 主序历史
+  转帧主序，输出沿用部署名 `actions` 加六个动作张量。固定 batch=1、opset=18、
+  单文件内嵌常量、最多 15000 帧；时间钳于 0 至全库末帧，目标窗口按所属 clip 钳位。
+- 发布版元数据函数仅在 `runtime/sim.py` 调用；补全 anchor/body 与七个观测 term，
+  scale/clip 等逐 term 数组同步扩展。参考导出器仅扩展名称与一组历史长度。
+- **2026-11-17 去弃用**：导出由旧 TorchScript 改用 `dynamo=True`，显式依赖
+  `onnxscript>=0.5.4`；常量检验按图连线而非节点名称，仍逐元素严格相等。
+  两个 contextmanager 返回类型改为 `Generator[None]`，未修改数值阈值。
+
+| CPU 导出自检 | 最大动作绝对误差（要求 <1e-4） |
+|---|---|
+| 初始 T8：100 次 CPU 试跑检查点、96 帧、43 组随机与边界输入 | 5.36442e-7 |
+| dynamo 路径：合成动作夹具 | 7.67e-7 |
+| dynamo 路径：245000 次真实动作检查点、11890 帧 | 4.17e-6 |
+
+- GhostRollout 对 env 0 独立维护预测状态、时间、ctx 与历史；真实/预测侧各自算目标和动作，
+  不用真实动作驱动虚影。两侧加 sensor 噪声、不加探索、不更新归一化；done 与周期重对齐，
+  其他环境 done 不影响 env 0，周期对齐保留真实历史。默认周期沿用参考 1000000 步。
+- native/viser 使用公开 `add_ghost_mesh` 薄子类与独立模型副本，RGBA 为 `[0.5,0.5,0.8,0.8]`；
+  native 透明模式再乘默认 0.3，实际 alpha=0.24，绘制测试阈值保持 1e-7。
+- macOS native 自动经 `mjpython` 启动，补 `sys.base_prefix/lib` 查找路径解决 libpython 问题；
+  仅成功完成有限步回放后用 `os._exit(0)` 避免发生重置后的 Cocoa 退出挂起，交互模式不变。
+- Mac CPU 小网络、H=3 的 100 次试跑检查点：native/viser 各 120 步（回合/周期对齐 3/21）；
+  native 2000 步为 49/170，均正常退出。Viser 浏览器交互 646 步为 15/55，
+  已观察参考/预测/真实机器人并验证暂停、单步、重置；图在 `outputs/mac-cpu/viser-aligned.jpg`。
+  原生窗口运行过但未取得截图。试跑会摔倒，长回放有 Warp 接触容量提示
+  （建议 nconmax/naconmax 36–39），未据此改默认容量，不作为物理精度或效果验收。
+
+## 最近代码验收与复现
+
+**最近代码验收（2026-11-18，提交前复跑）**：ruff、格式检查（51 文件）、
+pyright（0 errors / warnings）、完整 pytest **72 passed，1 warning，33.22 秒**。
+警告来自 mjlab 的 `torch.jit.script`；此前将弃用警告视为错误的专项检查为 67 passed，
+`reportDeprecated: error` 为 0 errors。Pyright 沙箱内未解析依赖时，使用沙箱外同命令或
+显式 `.venv` 的临时配置，未放宽规则。此前对拍和梯度阈值均保留。
+
+文档整理阶段仅核对结构、链接与命令语法；提交前另完成上述代码检查。
+本轮未重跑 GPU 验收，未改参考仓库或数值夹具。
+通用安装、CPU 调试、续训、导出和回放命令见 [README.md](../README.md)，不在各任务重复。
 
 ```bash
-mkdir -p runs/t1-gpu
-nvidia-smi --id=0 \
-  --query-gpu=timestamp,name,memory.used,memory.total,utilization.gpu \
-  --format=csv -lms 200 > runs/t1-gpu/2048-vram.csv
-```
-
-```bash
+uv run ruff check .
+uv run ruff format --check .
+uv run pyright
+uv run pytest
+uv run python tools/make_fixtures.py --reference ../supermimic
 uv run python tools/check_sim.py --device cuda:0 --num-envs 2048 --steps 1000
 uv run python tools/check_sim.py --device cuda:0 --num-envs 4096 --steps 1000
+uv run python tools/make_motion.py --all
 ```
 
-### 代码检查
+### 待用户在 RTX 5060 Ti 上运行
 
-- `uv run ruff check .`、`uv run ruff format --check .`（43 个文件）、
-  `uv run pyright`（0 errors / warnings）及 `uv run pytest`
-  **60 passed，5 warnings，43.04 秒**全部通过。
-- 沙箱内先用项目内 `UV_CACHE_DIR` 运行检查；Pyright 未解析到虚拟环境依赖，
-  改在沙箱外执行同一条 `uv run pyright` 后通过，没有改类型配置或压制错误。
-  GPU 访问同样使用沙箱外执行；pytest 仍为 CPU 验证，没有调用训练 GPU 验收。
-  五条测试警告均为已有的 TorchScript / 旧 ONNX 导出 API 弃用提示。
-- 本次仅更新本记录，未改源码、默认配置、SPEC、测试、夹具或误差阈值。
-
-## 2026-11-16 · T8、T9 推进安排（本次用户明确授权）
-
-- T6 的实现与 CPU 验证之后，先连续完成 T8 的实现与 CPU 数值验收，再完成
-  T9 的实现与 Mac CPU 回放实测，不等待 GPU。已同步 SPEC，保留所有原验收标准。
-- T1、T6 GPU 部分、T7、T8 最终 sim2sim 继续待用户在 RTX 5060 Ti 上运行；
-  最终 sim2sim 等 T7 得到合格策略后执行。试跑检查点仅验证功能，不代表训练效果。
-- 已找到 `runs/mac-cpu/00000050` 和 `runs/mac-cpu-resume/00000100`：
-  CPU、两环境、小网络、H=3，无需重新训练。沿用五目录结构，参考仓库只读。
-- 本次 Git 提交与推送未授权，不执行。
-
-### T8 实现与 CPU 数值实测
-
-- 接通 `export --verify`；输入 `obs` 为 fp32 `[1, H×93+640]`，
-  `time_step` 为 fp32 `[1, 1]`，图内转整数索引。历史每个 term 内最旧在前，
-  目标为 580 维关节窗口加 60 维相对朝向，不含 30 维相对位置。
-- 沿用参考 motion 部署图的输出名 `actions`，其余六项为 SPEC 指定的动作张量。
-  ONNX 内嵌全部六个动作库常量，跟踪 body 顺序与 `body_names` 一致；固定批量 1、
-  opset 18、无外部数据文件，拒绝超过 15000 帧的动作库。
-- 时间上界沿用参考的全动作库末帧；额外把负时间钳到 0，避免负索引意外取末帧。
-  这不改变有效时间的契约；目标窗口仍由既有实现按所属 clip 末帧钳位。
-- 发布版 mjlab 的元数据函数仅在 `runtime/sim.py` 调用，维持导入隔离；
-  补齐 anchor、body、两个目标 term 与历史长度，同时扩展 scale/clip 等逐 term
-  数组，使其与七个观测 term 一一对应。参考导出器只扩展名称和一组历史长度。
-- 使用已安装 torch 2.15 的公开 `torch.onnx.export(dynamo=False)`，与参考导出
-  契约一致且不增加依赖。Context7 与本地发布版源码均已核对；该路径有第三方
-  弃用警告，当前导出及 ONNX Runtime CPU 推理均可用。
-- 100 次试跑检查点：96 帧，43 组随机历史/目标及边界时间的 CPU 自检通过；
-  最大动作绝对误差 **5.36442e-7 < 1e-4**，六个动作库输出逐元素严格相等。
-  新增 7 项测试通过；T8 阶段完整 pytest **54 passed（26.19 秒）**，
-  ruff、格式检查与 pyright（0 errors）通过。
+以下新默认规模验收应检查时间戳运行目录中的 `checkpoints/00001000/`、
+`checkpoints/00001001/`、1001 行 `metrics.jsonl` 及 PNG/SVG 曲线；同时验证整卡峰值 <15 GB。
+先在另一终端启动显存采样，训练退出后 Ctrl+C；重测时更换采样文件名。
 
 ```bash
-uv run nanomimic export --checkpoint runs/mac-cpu-resume/00000100 \
-  --out outputs/mac-cpu/policy.onnx --verify
-uv run pytest tests/test_export.py
+mkdir -p runs
+nvidia-smi --id=0 --query-gpu=memory.used --format=csv,noheader,nounits \
+  -lms 200 > runs/default-4096-vram-mib.csv
 ```
 
-### T9 实现与 Mac CPU 实测
-
-- 接通 `play --viewer native|viser`，默认一个真实环境；只对 env 0 维护
-  一条预测状态、动作时间、随机化上下文和历史。真实侧与预测侧独立计算目标、
-  调用 Actor，动力学使用预测侧动作，没有把真实动作回灌成开环预测。
-- 两侧统一通过既有 `add_noise` 加传感器噪声；不加训练时的动作探索噪声，
-  不更新网络与归一化。虚影使用同一控制步长与 clip 末帧钳位。
-- 回合结束时对齐返回的新回合状态；定期对齐只重置预测历史，保留真实侧历史。
-  上一动作取真实观测的对应通道。其他环境 done 不会重置 env 0 的虚影。
-  也处理 viewer 重置及 Viser 动作控件绕过 viewer 的底层重置。
-- 默认 `num_steps_rollout=1000000` 取自参考 `scripts/play.py`，没有替换成
-  训练想象 horizon。实测显式设为 5 或 10，便于在短运行里观察对齐。
-- 两种查看器各一个薄子类，单步共享 `GhostRollout`，使用发布版公开的
-  `add_ghost_mesh(qpos, model, alpha, label)`，无需参考仓库私有 ghost 接口。
-  qpos 按发布版实体的地址映射写入，根位置补 env 0 世界偏移；模型为独立副本，
-  `geom_rgba=[0.5, 0.5, 0.8, 0.8]`，不改变真实仿真模型。
-- 发布版 native ghost 默认启用 `mjVIS_TRANSPARENT`，最终 alpha 还乘
-  `model.vis.map.alpha`（默认 0.3），因此渲染 alpha 为 0.24；模型 RGBA 仍为规格值。
-  Context7 与本地发布版源码核对后，绘制测试按此契约检查，误差阈值仍为 1e-7。
-- macOS 原生入口自动经 `mjpython` 重启；uv 的 venv 解释器为符号链接，
-  需把 `sys.base_prefix/lib` 加入启动进程的动态库查找路径。首次遇到的
-  libpython 加载失败已修复，并实际验证 CLI 启动。GUI/本机端口实测需要在
-  agent 沙箱外运行；普通终端直接使用下面的命令即可。
-- 100 次试跑检查点、Mac CPU：native 与 viser 各 **120 步**，均为回合对齐
-  **3 次**、定期对齐 **21 次**。native 延长到 **2000 步**，回合对齐 **49 次**、
-  定期对齐 **170 次**，没有回放异常或非有限虚影。
-- 收尾定位到 macOS native 的退出边界：发生回合重置后，Python 已打印结束且查看器
-  和仿真已关闭，mjpython 仍可能停在 Cocoa 原生退出阶段。基础 mjpython、只导入
-  PyTorch/MuJoCo/viewer 的对照均可退出；无回合重置的两步与含重置的 120 步形成复现。
-  因此仅在 macOS native **成功完成有限步**回放后调用 `os._exit(0)`，默认交互回放
-  不改。修复后含 **3 次**回合对齐的 120 步及 **2000 步**进程均实测以退出码 **0**
-  正常结束；2000 步仍为回合对齐 **49 次**、定期对齐 **170 次**。
-- Viser 浏览器实际观察到绿色参考虚影、紫色世界模型虚影和真实机器人，
-  验证暂停、单步（步数 0→1）、Reset Environment 后虚影立即对齐。
-  该次总计 **646 步**，回合对齐 **15 次**、周期对齐 **55 次**，最后 Ctrl+C 关闭。
-  对齐画面保存在 `outputs/mac-cpu/viser-aligned.jpg`，产物按既有规则不入 Git。
-  原生窗口已实际运行；计算机使用工具连接原生窗口超时，未取得其截图。
-- 试跑策略仍会摔倒、自动重置；较长回放出现发布版 Warp 的 broadphase
-  接触容量提示（建议 nconmax/naconmax 36–39）。本轮未改仿真接触容量或训练
-  默认值；上述实测只证明回放、虚影和对齐功能，不构成物理精度或训练效果验收。
-- 新增 6 项回放测试：独立预测输入和动作、周期对齐、其他环境 done 隔离、
-  回合及手动重置、真实 MuJoCo 场景绘制与模型隔离、CLI 和非法配置。
-  README 已补齐安装、GPU/CPU 训练、续训、导出契约、回放与交互说明。
-- 参考仓库未修改；其工作区已有未跟踪的 `.DS_Store`，本轮未处理该文件。
-
 ```bash
-uv run nanomimic play --checkpoint runs/mac-cpu-resume/00000100 \
-  --viewer native --device cpu --num-steps-rollout 5 --num-steps 120
-uv run nanomimic play --checkpoint runs/mac-cpu-resume/00000100 \
-  --viewer viser --device cpu --num-steps-rollout 5 --num-steps 120
-uv run pytest tests/test_export.py tests/test_viewer.py
+uv run nanomimic train --motion-file data/cache/lafan1-g1-v1/all.npz \
+  --device cuda:0 --num-envs 4096 --output runs/g1 --max-iterations 1001
+uv run python tools/evaluate_tracking.py \
+  --checkpoint runs/t7-lafan/checkpoints/00245000 --num-envs 64 --device cuda:0 --seed 0
 ```
 
-### 本轮检查与尚未完成的验收
-
-- T8 阶段 54 项完整测试通过；T9 新增测试后完整 pytest **60 passed
-  （31.53 秒）**，ruff、格式检查（42 文件）与 pyright（0 errors）通过。
-  第三方警告限于已记录的 torch.jit.script 与旧 ONNX 导出 API 弃用提示。
-- 保留五目录组织，只新增规格要求的两个 runtime 实现及对应测试；最大源码
-  文件为 `runtime/sim.py`（294 行）。既有夹具和数值误差阈值未修改。
-- 无 NVIDIA GPU，未运行 T1、T6 GPU、T7 或最终 sim2sim，未验证显存低于 15GB。
-  T8/T9 的实现与 CPU 验证已完成；Git 提交与推送等用户另行授权。
-- T1 和 T6 GPU 继续使用下方 T6/T2 记录的命令，状态为
-  **待用户在 RTX 5060 Ti 上运行**；默认 num_envs=2048 不变。
-- T7：待用户在 RTX 5060 Ti 上运行。准备真实动作文件到下面路径后训练；
-  收敛后与参考实现对比成功率和平均跟踪误差，阈值仍须由用户确认。
+T7 收敛与参考比较后，须用其合格检查点做最终 sim2sim。下面首行替换为合格检查点；
+ONNX 在 CPU 推理、物理在 GPU，从各片段首帧连续推进，保留摔倒终止，仅延长超时。
+该脚本尚未执行，CPU 自检与试跑回放不能替代它。
 
 ```bash
-uv run nanomimic train --motion-file data/lafan_run1_subject5.npz \
-  --device cuda:0 --output runs/t7
-```
-
-T8 最终 sim2sim：**待用户在 RTX 5060 Ti 上运行，且须先得到 T7 合格策略**。
-下列命令以 T7 默认最终检查点为例，ONNX Runtime 在 CPU 推理，物理环境在 GPU；
-从每段动作首帧连续跟踪到末帧，任何 terminated/truncated 都判失败。
-只延长验收回合时间以覆盖完整动作，不关闭摔倒终止。此命令本轮未执行，
-不以 100 次 CPU 试跑策略代替合格策略。
-
-```bash
-uv run nanomimic export --checkpoint runs/t7/01000000 \
-  --out outputs/t7.onnx --verify
+export NANOMIMIC_CHECKPOINT=runs/t7-lafan/checkpoints/00245000
+uv run nanomimic export --checkpoint "$NANOMIMIC_CHECKPOINT" --out /tmp/nanomimic-t8.onnx --verify
 uv run python - <<'PY'
+import os
 from pathlib import Path
 import numpy as np
 import onnxruntime as ort
@@ -330,9 +380,9 @@ from nanomimic.runtime.export import deployment_obs
 from nanomimic.runtime.sim import Sim
 from nanomimic.training.config import load_config
 
-cfg = load_config(Path("runs/t7/01000000"))
+cfg = load_config(Path(os.environ["NANOMIMIC_CHECKPOINT"]))
 assert cfg.motion_file is not None
-session = ort.InferenceSession("outputs/t7.onnx", providers=["CPUExecutionProvider"])
+session = ort.InferenceSession("/tmp/nanomimic-t8.onnx", providers=["CPUExecutionProvider"])
 with Sim(SimConfig(cfg.motion_file, num_envs=1, device="cuda:0", seed=cfg.seed)) as sim:
     env = sim._env
     env.cfg.episode_length_s = (sim.motion.num_frames + 1) * sim.robot.dt
@@ -351,8 +401,7 @@ with Sim(SimConfig(cfg.motion_file, num_envs=1, device="cuda:0", seed=cfg.seed))
             assert sim.motion_time.item() == frame, "动作时间未连续推进"
             packed = deployment_obs(history.window(), actor_goal(obs.goal)).cpu().numpy()
             action = session.run(["actions"], {
-                "obs": packed,
-                "time_step": np.array([[frame]], dtype=np.float32),
+                "obs": packed, "time_step": np.array([[frame]], dtype=np.float32),
             })[0]
             obs, _, terminated, truncated = sim.step(torch.as_tensor(action, device=sim.device))
             assert not (terminated | truncated).any(), f"第 {clip} 段第 {frame} 帧失败"
@@ -361,406 +410,3 @@ with Sim(SimConfig(cfg.motion_file, num_envs=1, device="cuda:0", seed=cfg.seed))
         start = end + 1
 PY
 ```
-
-## 2026-11-16 · 按职责整理目录（用户确认的方案二）
-
-### 结构与合并
-
-- 用户确认按 `common/`、`models/`、`rollout/`、`training/`、`runtime/` 五个目录
-  组织源码；当前实现文件由 19 个减为 16 个，不计 `__init__.py`。
-- 原顶层 `specs.py`、`rotation.py`、`networks.py` 移入 `common/`；
-  `model.py`、`policy.py` 移入 `models/`；`sensor.py`、`buffer.py`、`imagine.py`
-  移入 `rollout/`；`sim.py`、`motion.py` 移入 `runtime/`。
-- `goals.py` 与 `rewards.py` 合入 `rollout/imagine.py`，保留目标构造、重锚定、
-  奖励与软终止的数值表达式；`sinks.py` 合入 `training/train.py`。
-- 其余训练文件移入 `training/`，`training_config.py` 简写为 `config.py`。
-  后续 T8、T9 分别使用 `runtime/export.py` 与 `runtime/viewer.py`，本次不提前实现。
-- 更新全部源码、测试和工具脚本的导入路径；包入口仍为 `nanomimic.cli:main`，
-  CLI 参数和四文件检查点格式不变。各子包初始化只保留说明，不加载子模块。
-- 导入规则递归扫描全部子包，对 `common/`、`models/`、`rollout/` 全部模块检查
-  mjlab / mujoco / wandb 隔离；mjlab 例外限于完整路径 `runtime/sim.py` 和
-  `runtime/viewer.py`，其他目录中的同名文件不获得例外。
-- 已同步 `docs/SPEC.md` 的目录、模块职责、任务路径和导入规则，以及 `AGENTS.md`
-  与 `README.md`。此前 T6 的「无 SPEC 偏离」未反映目录与规模的差异，表述不够准确；
-  本次目录变更已获用户确认，并写入现行规格。
-
-### 验证
-
-- 迁移前：ruff、格式检查、pyright（0 errors）、pytest（47 passed，29.24 秒）通过。
-- 迁移后：ruff、格式检查（38 文件）、pyright（0 errors）、pytest
-  **47 passed（28.33 秒）** 全部通过；仅有已记录的第三方 torch.jit.script 弃用警告。
-- 与迁移前 HEAD 对比：20 个原模块归一化导入路径并移除说明字符串后，全部实现定义
-  的语法树一致；现有夹具逐字节一致。最大文件仍为 `runtime/sim.py`（274 行），
-  合并后的 `rollout/imagine.py` 为 169 行，`training/train.py` 为 176 行。
-- `uv run nanomimic --help` 与 `uv run nanomimic train --help` 正常退出。
-- 参考仓库未修改；本次只整理代码组织，GPU 验收仍待用户在 RTX 5060 Ti 上运行。
-
-下方 T0–T6 的文件名、目录和统计数据保留各任务当时的实测记录；现行路径以
-`docs/SPEC.md` 第 2 节及上述迁移说明为准。
-
-## 2026-11-16 · T6 训练循环与 CLI（CPU 通过，GPU 待运行）
-
-### 实现与 CPU 实测
-
-- 接入 `nanomimic train`：Collector → WorldModelFitter → PolicyImprover。
-  Trainer 只排程；训练次数按 replay_ratio×num_envs/(num_batches×batch×horizon)
-  累积，包含预热期的余额。单测验证每步 0.5 次的余额在可用窗口出现后正确消费。
-- 世界模型每个窗口预测 horizon 步，因此读取 horizon+1 个状态；默认 horizon=8
-  不变。全通道平方误差按 Bryson 权重加权后取均值，范数裁剪为 1.0。
-- Actor 对存活概率折扣回报与末端价值反向传播；动力学和 Critic 参数冻结，
-  但保留对输入的导数。Critic 使用 lambda=0.95 的 GAE，单测确认实际执行 5×4
-  个 minibatch；Actor 和 Critic 均使用 beta2=0.95、范数 1.0 与元素 0.1 裁剪。
-- 每个 MLP 的中间 Linear 权重使用发布版 `torch.optim.Muon`，其余参数使用
-  Adam；参数分组无遗漏、无重复。学习率默认均为 2e-4，Muon 采用参考的
-  `match_rms_adamw` 缩放；SPEC 未规定权重衰减，选择 0，不额外加入正则项。
-- 合成监督系统由独立解析积分产生标签，固定种子，小网络、CPU、60 次更新：
-  世界模型损失 **0.706855 → 0.00141098**，下降约 99.80%。默认训练宽度与规模未改。
-- 真实 mjlab CPU 运行：2 环境、H=3、世界模型和策略 batch=2 / horizon=2，
-  先跑 4 次迭代保存，再恢复到第 50 次，累计 25 轮 fit/improve。
-  `aot_eager` 与默认 `inductor` 两种编译后端均完成；最终所有网络参数、归一化
-  张量均有限。Inductor 最后一次世界模型损失 0.175211、策略损失 -0.493881、
-  Critic 损失 0.00105201；这些数字只说明闭环可运行，不是动作跟踪效果验收。
-- CPU 编译梯度验收：世界模型和策略的 `aot_eager` 与未编译版本一致
-  （atol=1e-6、rtol=1e-5）；策略改进前后动力学 state_dict 严格不变。
-- 检查点每 1000 次及结束时保存到独立迭代目录：world_model.pt、actor.pt、
-  critic.pt、config.json（schema_version=1）。含归一化、优化器动量、RNG、迭代号、
-  更新次数及小数余额。临时目录写完后重命名，已有目录拒绝覆盖。
-- `--resume` 先把保存配置交给 tyro 作为默认值，再应用本次显式参数，包括显式
-  设回默认值；显式学习率覆盖不会被优化器状态覆盖。恢复逐项验证参数、统计量、
-  优化器张量完全一致。仿真和回放重新初始化、预热，不承诺逐步轨迹完全复现。
-- 默认日志每 10 次，W&B 仅在显式指定 `--wandb-project` 时创建标量 Sink；
-  本机未连接 W&B。已核对 Context7 的 checkpoint、Muon、compile、tyro defaults
-  和 W&B scalar API，并核对本地 torch 2.15 的 Muon 实际默认值。
-- 最终检查：ruff、格式检查（36 文件）、pyright（0 errors）、完整 pytest
-  **47 passed（27.34 秒）**。仅有已记录的第三方 torch.jit.script 弃用警告。
-  包内最大文件为 sim.py（274 行）；现有对拍夹具未修改。
-- 无 SPEC 偏离。T3、T4、T5 已分别提交；T6 按本次授权独立提交，不推送。
-
-CPU 复现（输出目录已存在时换一个新目录）：
-
-```bash
-uv run pytest tests/test_learning.py -s
-uv run nanomimic train \
-  --motion-file tests/fixtures/motion.npz --device cpu --num-envs 2 \
-  --max-iterations 4 --buffer-capacity 16 --replay-ratio 1 \
-  --wm.batch 2 --wm.horizon 2 --wm.num-batches 1 \
-  --policy.batch 2 --policy.horizon 2 \
-  --dynamics.hidden 16 16 16 --actor.hidden 16 12 8 8 --critic.hidden 16 8 \
-  --actor.history-length 3 --log-interval 1 --output runs/t6-cpu
-uv run nanomimic train --resume runs/t6-cpu/00000004 \
-  --max-iterations 50 --log-interval 10 --output runs/t6-cpu-resume
-uv run ruff check .
-uv run ruff format --check .
-uv run pyright
-uv run pytest
-```
-
-CPU 首次 Inductor 编译较慢；可显式加 `--compile-backend aot_eager` 验证编译图，
-或 `--no-compile` 运行普通 CPU 调试。受限会话可在 T2 的缓存设置之外设置：
-
-```bash
-export TORCHINDUCTOR_CACHE_DIR=/private/tmp/nanomimic-inductor
-```
-
-### T1 和 T6 GPU：待用户在 RTX 5060 Ti 上运行
-
-本机是 M1 Pro，无 NVIDIA/CUDA；**未运行 GPU 验收，也未验证显存峰值低于 15GB**。
-T1 仍按下方 T2 记录的两档命令测量，默认 num_envs=2048 暂不修改。
-T6 请使用默认网络、批量、想象步数和缓冲，只把迭代数设为 50：
-
-```bash
-uv run python -c "import torch; print(torch.__version__, torch.version.cuda, torch.cuda.is_available())"
-uv run nanomimic train --motion-file tests/fixtures/motion.npz \
-  --device cuda:0 --max-iterations 50 --output runs/t6-gpu
-```
-
-在另一个终端从训练开始前采样，训练完成后 Ctrl+C 停止。排除其他 GPU 任务，
-检查整张卡显存以涵盖 Warp / MuJoCo 分配；日志中的 PyTorch 峰值不是总显存：
-
-```bash
-mkdir -p runs
-nvidia-smi --id=0 --query-gpu=memory.used --format=csv,noheader,nounits \
-  -lms 200 > runs/t6-gpu-vram-mib.csv
-```
-
-训练及显存采样结束后验证检查点与显存记录：
-
-```bash
-uv run python - <<'PY'
-from pathlib import Path
-import torch
-
-directory = Path("runs/t6-gpu/00000050")
-for name in ("world_model", "actor", "critic"):
-    payload = torch.load(directory / f"{name}.pt", map_location="cpu", weights_only=True)
-    assert payload["iteration"] == 50, "未完成 50 次迭代"
-    assert all(torch.isfinite(value).all() for value in payload["model"].values()), name
-    if name == "world_model":
-        assert payload["progress"]["updates"] > 0, "尚未执行训练更新"
-samples = Path("runs/t6-gpu-vram-mib.csv").read_text().splitlines()
-peak_gb = max(int(value.strip()) for value in samples if value.strip()) * 1024**2 / 1e9
-assert peak_gb < 15, f"显存峰值超限：{peak_gb:.3f} GB"
-print(f"50 次迭代检查点有限，总显存采样峰值 {peak_gb:.3f} GB")
-PY
-```
-
-此合成动作仅用于 T6 稳定性验收；T7 的 lafan_run1_subject5 收敛效果和阈值比较
-仍未开展。GPU 数据到手后再补记实际峰值、CUDA 构建与是否通过。
-
-## 2026-11-16 · T5 策略与可微想象
-
-- 实现单任务 Actor（目标编码器、32 维 tanh 潜变量、历史解码器）、特权 Critic、
-  目标窗口、重锚定奖励、软终止与逐步 checkpoint 的可微想象。
-  数学目标与奖励分别置于 `goals.py`、`rewards.py`，供后续训练与回放复用。
-- 对拍最大绝对误差：奖励 2.33e-9、软终止 0、目标窗口 2.99e-7，均低于
-  1e-5。额外测试阈值处终止概率 0.5、同姿态的有限梯度及片段末帧钳位。
-- 固定种子、4 步想象、H=3、小网络：Actor 所有参数梯度有限，总梯度非零；
-  checkpoint 开关的奖励严格一致，梯度满足 atol=1e-6、rtol=1e-5。
-  前向和重算均未更改归一化计数，单步没有闭包捕获后续被修改的循环状态。
-- 明确测试了计分时序：预测后对当前参考计分，再推进参考时间；末端 Critic
-  观测使用推进后的目标。回报测试验证 r_t 乘 s_t、bootstrap 乘 s_H。
-- 参考默认 `BaseRunnerCfg.history_length=1`，本项目沿用；编码器与解码器均采用
-  2048、1024、512、256 隐藏层（参考 models.py），Critic 为 256、128。
-  CPU 测试显式减小网络，不改训练默认值。
-- 旋转误差 acos 在 ±1 附近按参考钳位 1e-7；软终止的倾斜误差为投影重力
-  z 分量之差；价值仅钳制上界 5×dt/(1−gamma)，允许负值。均与参考数学契约一致。
-- 想象从回放中已有的带噪历史开始，后续每步只调用一次统一噪声入口；与参考
-  GenCoord 一致，合成 sensor 不额外施加编码器固定偏置，真实采集保留该偏置。
-- ruff、格式检查（28 文件）、pyright（0 errors）、pytest（40 passed）通过。
-  夹具未修改；本任务无 SPEC 偏离，无 GPU 验收声明。
-
-```bash
-uv run pytest tests/test_imagine.py
-uv run ruff check .
-uv run ruff format --check .
-uv run pyright
-uv run pytest
-```
-
-## 2026-11-16 · T4 传感器与回放缓冲
-
-- 实现 `synth_proprio`、统一的 `add_noise`、`HistoryRing` 与每环境环形回放。
-  合成传感器显式传入默认关节姿态，以保持关节位置为相对值且不依赖全局状态。
-- 历史为帧主序、最旧在前；重置行填充同一次噪声采样的整帧。
-  小历史使用函数式张量更新，避免原地覆盖想象反向传播仍需读取的数据。
-- 槽 t 保存 s_t、带噪 sensor_t、a_t 与该动作产生的 done_t；L 帧窗口仅检查
-  前 L−1 条连接无 done，最后一槽可为 done。T6 将采样 horizon+1 帧以取得
-  horizon 个合法监督后继，自动重置状态不会被当作旧回合后继。
-- `sample_start` 返回包含当前帧的 H 帧历史、对应动作和布尔掩码；False 表示
-  首帧填充，True 表示真实数据。窗口不足或已被环形覆盖时，以当前最早可用的
-  同回合观测填充并标 False，不读取已经覆盖的历史。起点上一动作从 sensor
-  尾部读取，不能把该槽尚未发出的 action 当成上一动作。
-- 采样先均衡覆盖有合法窗口的环境，再在各环境合法窗口内均匀抽样；合法性用
-  done 累加和计算，历史边界用累积最大值计算，没有逐环境 Python 采样循环。
-- CPU 验收覆盖噪声半宽、动作通道无噪声、历史梯度、部分行重置、terminated /
-  truncated、环境分层、容量覆盖、H=1、空缓冲与无合法窗口的环境。
-- ruff、格式检查（23 文件）、pyright（0 errors）、pytest（34 passed）通过。
-  默认缓冲保持每环境 1000 步；现有夹具未改动，无 SPEC 偏离。
-
-```bash
-uv run pytest tests/test_sensor_buffer.py
-uv run ruff check .
-uv run ruff format --check .
-uv run pyright
-uv run pytest
-```
-
-## 2026-11-16 · T3 可微世界模型
-
-- 实现纯张量表示、半隐式积分、状态重建、FK、损失分组与 Dynamics。
-  `rotation.py` 和 `networks.py` 分别承载复用数学与网络构件，保持单文件约 300 行以内。
-- fp32 对拍（`atol=1e-5, rtol=0`）：represent、loss_groups、Bryson 权重误差为 0；
-  积分 aux 最大误差 1.20e-7、rep 最大误差 2.99e-7；FK 位置/四元数最大误差
-  4.18e-7，线速度 2.91e-7，角速度 8.05e-7。现有夹具未改动。
-- 零角速度积分及 FK 的梯度有限且非零；动作到动力学输出的梯度通过。
-  RunningNorm 分批合并统计量与一次性总体统计一致，前向不隐式更新。
-- 未明确的归一化细节采用合并批次矩，标准差下限 0.01；只由采集阶段显式更新，
-  避免想象、checkpoint 重算和评估污染统计。均值、方差、计数均进 state_dict。
-- 积分仍采用规格规定的完整 dt（substep 系数 1.0）。FK 独立按运动树传播位姿和
-  body 原点扭量，包含铰链原点偏移；没有引入参考类层次或仿真器依赖。
-- 默认 Dynamics 保持 3 × 2048；CPU 梯度测试显式使用小网络。
-- 检查通过：ruff、格式检查（20 文件）、pyright（0 errors）、pytest（27 passed）。
-  第三方 torch.jit.script 弃用警告与 T2 相同。无 GPU 验收声明，无 SPEC 偏离。
-- 本次用户已授权 T3–T6 各自独立提交、不推送；T1 保持待用户在 RTX 5060 Ti 上运行。
-
-```bash
-uv run pytest tests/test_model.py
-uv run ruff check .
-uv run ruff format --check .
-uv run pyright
-uv run pytest
-```
-
-## 2026-11-16 · T2 仿真适配与对拍夹具
-
-### 状态与实测
-
-- 按用户本次要求，先做 M1 Pro 上可以验收的任务。T0 已有提交；T1 仍待 GPU
-  实测，本次推进 T2，不把 T1 记为完成，默认 `num_envs=2048` 暂不调整。
-- 实现 `Sim`、`Obs`、`RobotSpec`、`Motion`、`ContextSpec`，注册
-  `Nanomimic-Tracking-Flat-Unitree-G1`。配置为 frozen dataclass，
-  `tools/check_sim.py` 用 tyro 暴露 CPU/CUDA 验收参数。
-- 使用现有只读参考仓库 `../supermimic`，提交
-  `abc124c1bd5976341034668af3d12c087f2f1f55`；没有修改参考仓库，也没有安装其私有 mjlab fork。
-- 环境：Python 3.13.7、torch 2.15.0、mjlab 1.6.1、MuJoCo 3.11.0、Warp 1.19.0；
-  设备明确为 `cpu`，CUDA 不可用。
-- 独立验收命令跑通 **2 个环境 × 100 步随机动作**，共 3 次自动重置。
-  首次运行的步进部分（含契约检查）耗时 3.17 秒；此值不用于 GPU 性能推断。
-- 每步检查：状态 `[2, 71]`、目标 `[2, 670]`、传感器 `[2, 93]`、
-  上下文 `[2, 33]`，所有值有限，上下文在 `[-1, 1]` 内。
-- 机器人：29 关节、30 个运动树 body、14 个跟踪 body，锚点 `pelvis`，
-  控制步长 0.02 秒，软终止阈值分别为 0.25 与 0.8。
-- 最终检查：`ruff check`、`ruff format --check`（15 个文件）、`pyright`
-  （0 errors）与 `pytest`（23 passed，6.60 秒）通过。唯一警告来自 mjlab 导入时的
-  `torch.jit.script` 弃用提示，与 T0 已记录的问题相同。
-
-### 契约与决策
-
-1. **发布版接口**：通过 Context7 文档和本地 1.6.1 源码核对，重置模式名称确为
-   `adaptive`。发布版在整段动作结束时重采样、写入机器人状态；本项目在 `sim.py`
-   内用薄子类将推进改为片段末帧钳位，保留其 adaptive 采样与失败率更新。
-2. **片段端点**：NPZ 可选 `motion_ends` 沿用参考的右开端点；读入后转换成
-   `Motion.clip_ends` 的包含式末帧索引。未提供时是一段动作。文件必须包含完整
-   30 个机器人 body 的数据，之后选取 14 个跟踪 body；不接受缺字段、错误形状、
-   非有限值、非单位四元数或错误帧率。若存在 `fps`，必须为 50，不自动重采样。
-3. **传感器**：沿用参考的部署含义：关节位置是相对默认姿态的编码器读数，包含
-   固定的编码器偏置；基座角速度来自 IMU。这里的“干净”指未添加逐帧均匀噪声，
-   不移除域随机化偏置。噪声入口留给 T4 的 `sensor.py`。
-4. **上下文**：三个通道实际为 `1 + 3 + 29 = 33` 维，顺序是脚摩擦、质心偏移、
-   编码器偏置。摩擦读取实际全局 geom 索引；质心先减名义 `body_ipos`，再按
-   配置中的偏移范围归一化。参考实现直接归一化绝对 `body_ipos`，可能超出
-   `[-1, 1]`；本项目按 SPEC 的范围要求修正，不以 clamp 隐藏越界。
-5. **自动重置**：沿用 mjlab 的自动重置语义。`step()` 的 done 标志描述旧回合，
-   done 行返回的是新回合观测，上一动作清零；后续缓冲不能把它当成旧回合的后继。
-   返回观测、奖励、done 和动作时间均为快照，不会被下一步原地覆盖。
-6. **解耦**：dataclass 放在纯张量 `specs.py`，NPZ 校验放在 `motion.py`；
-   仿真器导入仍仅在 `sim.py`。FK 常量使用完整树的父节点、固定变换、关节轴、
-   铰链原点与 qpos0，后续 T3 不需要导入 mjlab 或 MuJoCo。
-7. **类型检查**：将工具脚本也纳入 pyright。MuJoCo 的公开 C 扩展动态导出缺失
-   可解析类型桩，仅在工具中对应的单行导入精确抑制 `reportAttributeAccessIssue`；
-   项目其他代码继续执行原有检查规则。
-
-### 夹具与验证范围
-
-- `tools/make_fixtures.py` 调用参考实现生成表示、积分、损失分组、Bryson 权重、
-  目标窗口、奖励和软终止真值；没有把参考代码复制进本项目。
-- 积分显式采用 SPEC 的 `substep_coeff=1.0`；参考工厂在 decimation=4 时采用
-  0.625。差异是执行已有规格，不是新增选择。
-- 发布版 mjlab 不含参考私有 fork 的 `ForwardKinematics`。FK 夹具由 MuJoCo
-  `mj_forward` 和 body 原点处的 `mj_jac` 独立计算，速度为世界系；不把质心速度
-  误当成 link 原点速度。夹具同时保存完整运动树常量供 T3 对拍。
-- 合成动作共 96 帧、两个片段，只用于接口验收；不代表 `lafan_run1_subject5`
-  的训练效果。`manifest.json` 记录种子、依赖版本、参考提交、源码及产物 SHA-256。
-  所有夹具均通过生成器生成，未手工编辑。
-- 在独立临时目录再次运行生成器，两个 NPZ 与 `manifest.json` 均逐字节一致。
-- 测试覆盖随机步进、自动重置、超时、注册配置隔离、返回值快照、实际随机化参数、
-  运动树常量、片段边界和错误输入。状态与目标观测对参考夹具使用 `atol=1e-5, rtol=0`。
-  mjlab 的 `get_observations()` 会返回缓存；测试写入状态后显式刷新观测管理器。
-- T3/T5 的数值实现与梯度验收尚未开始；当前只是为它们生成真值。
-- 用户已于 2026-11-16 明确授权提交 T2；提交前复跑 ruff、格式检查、pyright 与
-  pytest（23 passed）全部通过。
-
-复现命令（普通终端）：
-
-```bash
-uv run python tools/make_fixtures.py --reference ../supermimic
-uv run python tools/check_sim.py
-uv run ruff check .
-uv run ruff format --check .
-uv run pyright
-uv run pytest
-```
-
-受限 agent 会话中为上述命令设置可写缓存目录；普通终端不需要：
-
-```bash
-export UV_CACHE_DIR="$PWD/.uv-cache"
-export MPLCONFIGDIR=/private/tmp/nanomimic-mpl
-export XDG_CACHE_HOME=/private/tmp/nanomimic-cache
-export WARP_CACHE_PATH=/private/tmp/nanomimic-warp
-```
-
-### T1：待用户在 RTX 5060 Ti 上运行
-
-先核对 CUDA 构建，再分别运行两档环境数。下面使用同一份本地合成动作，输出的是
-含形状/有限性检查的环境步数/秒；不能和去掉检查的纯物理吞吐直接比较。
-另一个终端运行 `nvidia-smi` 采样显存，排除其他 GPU 进程后记录峰值。
-拿到两档实测数据前不确定最终默认环境数。
-
-```bash
-uv run python -c "import torch; print(torch.__version__, torch.version.cuda, torch.cuda.is_available())"
-nvidia-smi --query-gpu=timestamp,name,memory.used --format=csv -lms 200
-```
-
-```bash
-uv run python tools/check_sim.py --device cuda:0 --num-envs 2048 --steps 1000
-uv run python tools/check_sim.py --device cuda:0 --num-envs 4096 --steps 1000
-```
-
-GPU 命令本机未运行。T6、T7、T8 的 GPU 验收留到对应任务，不在 T2 宣称通过。
-
-## 2026-11-15 · T0 脚手架
-
-### 目录与环境
-
-- 开发文档移到 `docs/`（`docs/SPEC.md` 为规格，本文件为记录），`AGENTS.md` 留在根目录
-  供 agent 自动加载，路径引用已同步；移动后复跑全套检查通过。
-- 开发机 macOS Darwin 27.2.0 / Apple Silicon（arm64），无 NVIDIA GPU；
-  uv 0.13.8、git 2.54.0、Python 3.13.7（uv 管理）。
-- `uv sync` 解析 154 个包、安装 133 个。锁定版本：torch 2.15.0、mjlab 1.6.1、
-  tyro 1.0.17、onnx 1.23.2、onnxruntime 1.32.0、pytest 9.2.0、ruff 0.17.5、pyright 1.1.414。
-- `ruff check`、`ruff format --check`（7 个文件）、`pyright`（0 errors）、
-  `pytest`（3 passed）、`nanomimic --help` 全部通过。
-- 本机 torch 为 macOS 构建：`torch.version.cuda is None`、`torch.cuda.is_available() is False`，符合预期。
-- agent 会话受文件沙箱限制，uv 缓存放在工作区 `.uv-cache/`（已 gitignore，约 1.4 GB，
-  可随时删除）；正常终端环境无需此设置。
-
-### 决策与理由
-
-1. **Python 3.13，不升 3.14**（2026-11-16 复核）。
-   - mjlab 1.6.1 的 PyPI 元数据为 `Requires-Python: >=3.10,<3.14`，0.0.5 起所有版本都带上限。
-   - uv 解析时只取 `requires-python` 下界、忽略上界（uv 文档 `pip/compatibility.md`
-     明确说明），所以 3.14 下 `uv sync` 照样成功；但 `pip install mjlab==1.6.1` 会直接
-     报 `No matching distribution found`。**「uv sync 能过」不能作为兼容性判据。**
-   - 3.14 下功能实测均正常（G1 跟踪任务 reset + 20 步、cartpole、warp CPU 内核、
-     ONNX 导出与推理误差 1.2e-7、`torch.compile`）。唯一实质风险是 `torch.jit.script`
-     在 3.14 被 torch 标为 `not supported ... may break`，而 mjlab 的
-     `utils/lab_api/math.py` 有 28 个 `@torch.jit.script` 函数；3.13 下只发 deprecated 级警告。
-   - 结论：退回 3.13（`docs/SPEC.md` 第 1 节允许）。升级前提是 mjlab 放开上界
-     **且** torch 在 3.14 上仍支持 `jit.script`，缺一不升。
-2. **mjlab 放在默认依赖**：`uv sync` 一次装好仿真依赖，T1/T2 可直接使用；
-   `wandb`、`tensordict` 只是 mjlab 的传递依赖，本项目代码不直接导入。
-3. **CLI 在 T0 只搭骨架**：三个子命令与参数（`--checkpoint`、`--viewer`、`--out`、
-   `--verify`）已可用，执行逻辑留给 T6、T8、T9，当前以退出码 1 提示「尚未实现」。
-   命令行契约先固定，后续只填实现。
-4. **导入规则测试按 `docs/SPEC.md` 分层**：`tests/test_import_rules.py` 用 AST 检查
-   model、policy、sensor、imagine、buffer 不得导入 mjlab、mujoco、wandb；全包范围只有
-   sim.py、viewer.py 可以导入 mjlab。核心文件由后续任务创建，出现后自动纳入检查。
-5. **ruff 关闭 RUF001/002/003**：文档、注释和输出按 AGENTS.md 使用中文全角标点，
-   这三条同形字歧义规则会误报；其余 E/F/I/UP/B/SIM/RUF 规则保持开启。
-6. **pyright 用 standard 模式**：`docs/SPEC.md` 只要求无报错，standard 已能覆盖本项目的
-   类型错误，strict 会被第三方类型桩的细节淹没；后续出现关键数值代码问题时再局部提高。
-7. **默认索引写进 `pyproject.toml`**：`[[tool.uv.index]]` 里声明清华镜像并设
-   `default = true`，锁文件因此不依赖某台机器的全局 uv 配置（已在干净 `HOME` 下验证）。
-   注意 `uv lock --no-config` 会忽略 pyproject 里的索引配置，不能用来验证镜像设置。
-
-### 与参考仓库的差异
-
-T0 未使用参考仓库：`../supermimic-ref` 尚不存在，脚手架不需要其中的常量或契约。
-T2 开始按 `docs/SPEC.md` 克隆为只读参考，只取常量、夹具和 mjlab 契约，不复制其文件结构或代码。
-
-### 待用户在 RTX 5060 Ti 上运行
-
-T0 无 GPU 验收项，但 torch 的 CUDA 构建需在 GPU 机上核对（本机为 macOS 构建）：
-
-```bash
-uv run python -c "import torch; print(torch.__version__, torch.version.cuda, torch.cuda.is_available())"
-```
-
-期望 `torch.version.cuda` 不低于 12.8 且 `torch.cuda.is_available()` 为 `True`。
-若默认 wheel 不满足，按 PyTorch 2.15 官方说明换 CUDA 12.8+ 构建并把实际版本补记到本节。
-
-### 待用户确认
-
-- T0 无偏离 `docs/SPEC.md` 的决定需要确认。
-- 第 6 节第 2 条的效果阈值要等 T7 与参考实现对比后再提交确认。

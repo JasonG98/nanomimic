@@ -16,13 +16,17 @@ from nanomimic.common.networks import RunningNorm, mlp
 class ActorConfig:
     """历史默认值取参考 BaseRunnerCfg.history_length。"""
 
+    #: Actor 使用的连续观测帧数，包含当前帧。
     history_length: int = 1
+    #: Actor 编码器和解码器各自采用的隐藏层宽度序列。
     hidden: tuple[int, ...] = (2048, 1024, 512, 256)
+    #: 目标编码器的输出维数；经 tanh 后与观测历史拼接。
     latent_dim: int = 32
 
 
 @dataclass(frozen=True)
 class CriticConfig:
+    #: Critic 价值网络各隐藏层的神经元数，按层顺序传入。
     hidden: tuple[int, ...] = (256, 128)
 
 

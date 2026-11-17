@@ -16,7 +16,7 @@ class SimConfig:
     """G1 跟踪环境配置，CPU 验收时显式减小 num_envs。"""
 
     motion_file: Path
-    num_envs: int = 2048
+    num_envs: int = 4096
     device: str = "cuda:0"
     seed: int = 0
 

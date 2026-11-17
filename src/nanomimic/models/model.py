@@ -138,6 +138,7 @@ def bryson_weights() -> dict[str, float]:
 class DynamicsConfig:
     """默认训练宽度保持规格值，CPU 验收可显式减小。"""
 
+    #: 世界模型各隐藏层的神经元数，按层顺序传入。
     hidden: tuple[int, ...] = (2048, 2048, 2048)
 
 

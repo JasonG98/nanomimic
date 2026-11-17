@@ -51,12 +51,14 @@ def test_onnx_contract_constants_clamping_and_cpu_error(tmp_path: Path, motion: 
     ]
     assert [item.name for item in session.get_outputs()] == policy.output_names()
     model = onnx.load(out)
+    # 动作库必须以常量内嵌在单个文件里，而不是外部数据。
     assert all(value.data_location == onnx.TensorProto.DEFAULT for value in model.graph.initializer)
+    initializers = {value.name: onnx.numpy_helper.to_array(value) for value in model.graph.initializer}
     for name in policy.output_names()[1:]:
-        # 输入 buffer 与同名输出发生冲突时，导出器可重命名 initializer。
-        lookup = next(node for node in model.graph.node if node.op_type == "Gather" and name in node.output)
-        initial = next(value for value in model.graph.initializer if value.name == lookup.input[0])
-        np.testing.assert_array_equal(onnx.numpy_helper.to_array(initial), getattr(motion, name).numpy())
+        # 导出器会重命名常量；按图连线找到每个输出所用的首个输入，再核对内容。
+        node = next(node for node in model.graph.node if name in node.output)
+        assert node.input[0] in initializers, name
+        np.testing.assert_array_equal(initializers[node.input[0]], getattr(motion, name).numpy())
     for name, value in actor.state_dict().items():
         torch.testing.assert_close(value, before[name], atol=0, rtol=0)
 
@@ -106,3 +108,5 @@ def test_export_cli_options() -> None:
     command = parse_command(["export", "--checkpoint", "runs/100", "--out", "outputs/g1.onnx", "--verify"])
     assert isinstance(command, ExportCmd) and command.verify
     assert command.checkpoint == Path("runs/100") and command.out == Path("outputs/g1.onnx")
+    default = parse_command(["export", "--checkpoint", "runs/100"])
+    assert isinstance(default, ExportCmd) and default.out is None

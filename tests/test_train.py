@@ -5,12 +5,14 @@
 """
 
 import json
+import re
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
 import torch
 
+import nanomimic.training.train as training
 from nanomimic.cli import TrainCmd, parse_command
 from nanomimic.common.specs import SimConfig
 from nanomimic.models.model import DynamicsConfig
@@ -68,7 +70,7 @@ def test_real_training_schedule_and_resume(tmp_path: Path) -> None:
             [
                 "train",
                 "--resume",
-                str(saved),
+                str(trainer.output / saved.name),
                 "--max-iterations",
                 "8",
                 "--output",
@@ -79,6 +81,7 @@ def test_real_training_schedule_and_resume(tmp_path: Path) -> None:
         )
         assert isinstance(command, TrainCmd) and command.log_interval == 10
         resume_cfg = resolve_config(command)
+        assert resume_cfg.resume == saved
         resumed = Trainer(sim, resume_cfg)
         assert resumed.iteration == 4 and resumed.updates == 2 and resumed.buffer.size == 0
         for name, (model, optim) in trainer.models().items():
@@ -90,14 +93,78 @@ def test_real_training_schedule_and_resume(tmp_path: Path) -> None:
                 for parameter_id, state in before["state"].items():
                     for key, value in state.items():
                         torch.testing.assert_close(value, after["state"][parameter_id][key], atol=0, rtol=0)
-        result = resumed.run(ScalarSink())
+        sink = ScalarSink(output=resumed.output)
+        try:
+            result = resumed.run(sink)
+        finally:
+            sink.close()
         assert result.name == "00000008" and resumed.updates == 4
-        assert (resume_cfg.output / "00000006/config.json").is_file()
+        assert resumed.output.parent == resume_cfg.output
+        assert (resumed.output / "checkpoints/00000006/config.json").is_file()
+        rows = [json.loads(line) for line in (resumed.output / "metrics.jsonl").read_text().splitlines()]
+        assert [row["iteration"] for row in rows] == [5, 6, 7, 8]
+        assert "wm_loss" not in rows[0] and "wm_loss" in rows[-1]
+        assert (resumed.output / "training-curves.png").is_file()
+        assert "截至迭代 8" in (resumed.output / "training-curves.svg").read_text()
+        inherited = parse_command(["train", "--resume", str(saved)])
+        assert isinstance(inherited, TrainCmd) and inherited.output == cfg.output
+
+
+def test_training_artifacts_and_refresh_intervals(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """真实 CPU 训练覆盖时间戳、逐轮记录、周期刷新和不足周期的最终保存。"""
+    cfg = replace(_small_config(tmp_path), max_iterations=5)
+    refreshes: list[int] = []
+    render = training.plot_training_curves
+
+    def capture(rows: list[dict[str, float]], output: Path, labels: dict[str, str]) -> None:
+        iteration = int(rows[-1]["iteration"])
+        assert (output / "checkpoints" / f"{iteration:08d}" / "config.json").is_file()
+        refreshes.append(iteration)
+        render(rows, output, labels)
+
+    monkeypatch.setattr(training, "plot_training_curves", capture)
+    result = training.train(cfg)
+    assert result.parent.name == "checkpoints"
+    output = result.parent.parent
+    assert output.parent == cfg.output and re.fullmatch(r"\d{8}_\d{6}(?:_\d+)?", output.name)
+    assert result.name == "00000005"
+    assert refreshes == [2, 4, 5]
+    assert {path.name for path in output.iterdir()} == {
+        "config.json",
+        "run.json",
+        "checkpoints",
+        "evaluations",
+        "exports",
+        "metrics.jsonl",
+        "training-curves.png",
+        "training-curves.svg",
+    }
+    assert {path.name for path in (output / "checkpoints").iterdir()} == {
+        "00000002",
+        "00000004",
+        "00000005",
+        "index.json",
+    }
+    assert json.loads((output / "checkpoints/index.json").read_text())["latest"] == result.name
+    assert json.loads((output / "run.json").read_text())["resume"] is None
+    rows = [json.loads(line) for line in (output / "metrics.jsonl").read_text().splitlines()]
+    assert [row["iteration"] for row in rows] == [1, 2, 3, 4, 5]
+    assert rows[2]["wm_loss"] > 0 and "wm_loss" not in rows[0]
+    assert (output / "training-curves.png").read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+    assert "截至迭代 5" in (output / "training-curves.svg").read_text()
+    assert load_config(result).output == cfg.output
+    console = capsys.readouterr().out
+    assert re.findall(r"^迭代 (\d+) \|", console, re.MULTILINE) == ["2", "4"]
+    assert f"训练输出目录：{output}" in console
 
 
 def test_default_config_and_invalid_values(tmp_path: Path) -> None:
     cfg = TrainConfig()
-    assert cfg.num_envs == 2048 and cfg.buffer_capacity == 1000 and cfg.replay_ratio == 16
+    assert cfg.num_envs == 4096 and cfg.max_iterations == 100_000
+    assert cfg.log_interval == 100 and cfg.save_interval == 1000
+    assert cfg.buffer_capacity == 1000 and cfg.replay_ratio == 16
     assert (cfg.wm.batch, cfg.wm.horizon, cfg.wm.num_batches) == (2048, 8, 10)
     assert (cfg.policy.batch, cfg.policy.horizon) == (2048, 32)
     assert cfg.dynamics.hidden == (2048, 2048, 2048)

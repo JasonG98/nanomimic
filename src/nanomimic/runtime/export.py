@@ -15,6 +15,7 @@ from torch import Tensor, nn
 
 from nanomimic.common.specs import Motion, SimConfig
 from nanomimic.models.policy import Actor
+from nanomimic.runtime.paths import resolve_checkpoint, run_directory
 from nanomimic.runtime.sim import Sim
 from nanomimic.training.checkpoints import load_weights
 from nanomimic.training.config import load_config
@@ -87,7 +88,7 @@ def write_onnx(policy: MotionPolicy, out: Path) -> None:
         opset_version=18,
         input_names=["obs", "time_step"],
         output_names=policy.output_names(),
-        dynamo=False,
+        dynamo=True,
     )
     onnx.checker.check_model(str(out))
 
@@ -120,14 +121,16 @@ def verify_onnx(policy: MotionPolicy, out: Path, clip_ends: Tensor) -> float:
     return error
 
 
-def export(checkpoint: Path, out: Path, verify: bool = False) -> None:
+def export(checkpoint: Path, out: Path | None = None, verify: bool = False) -> None:
     """读取检查点配置与原动作文件，在 CPU 导出；不恢复优化器或启动训练。"""
+    checkpoint = resolve_checkpoint(checkpoint)
     cfg = load_config(checkpoint)
     if cfg.motion_file is None:
         raise ValueError("检查点缺少 motion_file")
     with Sim(SimConfig(cfg.motion_file, num_envs=1, device="cpu", seed=cfg.seed)) as sim:
         actor = Actor(len(sim.robot.joint_names), cfg.actor)
         iteration = load_weights(checkpoint, "actor", actor, sim.device)
+        out = out or run_directory(checkpoint) / "exports" / f"actor-{iteration:08d}.onnx"
         policy = MotionPolicy(actor, sim.motion)
         write_onnx(policy, out)
         sim.attach_export_metadata(out, actor.history_length, str(checkpoint.resolve()))

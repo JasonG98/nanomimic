@@ -19,6 +19,7 @@ from nanomimic.models.model import Dynamics, aux_state, reconstruct_full_state, 
 from nanomimic.models.policy import Actor
 from nanomimic.rollout.imagine import actor_goal, wm_goal
 from nanomimic.rollout.sensor import HistoryRing, add_noise, synth_proprio
+from nanomimic.runtime.paths import resolve_checkpoint
 from nanomimic.runtime.sim import Sim
 from nanomimic.training.checkpoints import load_weights
 from nanomimic.training.config import load_config
@@ -168,6 +169,7 @@ def play(
     """加载 Actor 与世界模型供单环境回放；num_steps 用于有限步数的实际查看器验收。"""
     if num_steps_rollout < 1 or (num_steps is not None and num_steps < 1):
         raise ValueError("回放与对齐步数必须大于零")
+    checkpoint = resolve_checkpoint(checkpoint)
     cfg = load_config(checkpoint)
     if cfg.motion_file is None:
         raise ValueError("检查点缺少 motion_file")

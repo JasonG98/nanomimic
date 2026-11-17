@@ -24,7 +24,7 @@ def sim() -> Iterator[Sim]:
 
 def test_registered_task_and_robot_constants(sim: Sim) -> None:
     cfg = load_env_cfg("Nanomimic-Tracking-Flat-Unitree-G1")
-    assert cfg.scene.num_envs == 2048, "注册配置不能被首次创建的 CPU 实例改写"
+    assert cfg.scene.num_envs == 4096, "注册配置不能被首次创建的 CPU 实例改写"
     assert set(cfg.observations) == {"actor", "goal", "full_state"}
     assert set(cfg.events) == {"foot_friction", "base_com", "encoder_bias"}
     assert "self_collisions" not in cfg.rewards
