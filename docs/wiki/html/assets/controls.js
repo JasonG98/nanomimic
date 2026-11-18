@@ -2,6 +2,19 @@
 // 初始读数和图形写在 HTML 中，离线与静态海报都能读到完整示例。
 // 控件只更新所在图的数据，键盘操作沿用浏览器原生行为。
 
+// Pages 只托管 docs。在线阅读时到 GitHub 浏览源码和 Markdown，本地阅读沿用相对路径。
+if (location.hostname === "jasong98.github.io") {
+  const source = "https://github.com/JasonG98/nanomimic/blob/main/docs/wiki/html/";
+  for (const link of document.querySelectorAll('a[href^="../"]')) {
+    const href = link.getAttribute("href");
+    const url = new URL(href, source);
+    if (href.startsWith("../../../") || url.pathname.endsWith(".md")) {
+      if (url.pathname.endsWith("/")) url.pathname = url.pathname.replace("/blob/", "/tree/");
+      link.href = url.href;
+    }
+  }
+}
+
 function enableFrameWindow(panel) {
   const slider = panel.querySelector("input");
   const current = panel.querySelector("#frame-value");

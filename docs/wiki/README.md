@@ -1,6 +1,6 @@
 # nanomimic 图解 Wiki
 
-第一次接触这个项目，可以先看一段仿真记录怎样用来训练模型和策略，再用膝关节的例子算出 20 毫秒后的角度。想修改代码时，从源码地图找对应的文件。[训练闭环](01-training.png) · [世界模型](04-world-model.png) · [源码地图](02-architecture.png)
+第一次接触这个项目，可以先看一段仿真记录怎样用来训练模型和策略，再用膝关节的例子算出 20 毫秒后的角度。在线版可以直接翻页、拖动目标帧和调节摔倒风险。[打开交互图解](https://jasong98.github.io/nanomimic/) · [训练闭环](01-training.png) · [世界模型](04-world-model.png) · [源码地图](02-architecture.png)
 
 [![图册封面，G1 在同一段参考舞步中迈步、转身和举起双臂](00-index.png)](00-index.png)
 

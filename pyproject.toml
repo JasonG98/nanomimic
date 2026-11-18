@@ -1,10 +1,12 @@
 [project]
 name = "nanomimic"
 version = "0.1.0"
-description = "用可微世界模型在想象中反向传播的人形全身动作跟踪训练管线"
+description = "用可微世界模型训练 Unitree G1 全身动作跟踪策略，支持 MuJoCo 回放和 ONNX 导出"
 readme = "README.md"
 license = "Apache-2.0"
+license-files = ["LICENSE"]
 authors = [{ name = "nanomimic contributors" }]
+keywords = ["unitree-g1", "humanoid-robotics", "motion-tracking", "world-model", "mujoco", "onnx"]
 requires-python = ">=3.13,<3.14"
 dependencies = [
     "matplotlib>=3.11,<4",
@@ -18,6 +20,12 @@ dependencies = [
 
 [project.scripts]
 nanomimic = "nanomimic.cli:main"
+
+[project.urls]
+Repository = "https://github.com/JasonG98/nanomimic"
+Documentation = "https://github.com/JasonG98/nanomimic/blob/main/docs/QUICKSTART.md"
+Changelog = "https://github.com/JasonG98/nanomimic/releases"
+Issues = "https://github.com/JasonG98/nanomimic/issues"
 
 [dependency-groups]
 dev = ["pyright", "pytest", "ruff"]

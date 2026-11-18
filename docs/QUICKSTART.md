@@ -4,9 +4,11 @@
 
 ## 安装
 
-装好 uv 后同步锁定的 Python 3.13 依赖。[uv 安装说明](https://docs.astral.sh/uv/getting-started/installation/)
+首次使用发布版时，克隆对应标签，再用 uv 同步锁定的 Python 3.13 依赖。[uv 安装说明](https://docs.astral.sh/uv/getting-started/installation/)
 
 ```bash
+git clone --branch v0.1.0 https://github.com/JasonG98/nanomimic.git
+cd nanomimic
 uv sync --locked
 uv run nanomimic --help
 uv run python -c 'import torch; print(torch.cuda.is_available())'
@@ -14,7 +16,39 @@ uv run python -c 'import torch; print(torch.cuda.is_available())'
 
 最后一条输出 `True` 表示 PyTorch 可以使用 CUDA。
 
-### CPU 快速验证
+## 使用预训练权重
+
+v0.1.0 提供在 40 段 LAFAN1 动作上训练 100000 轮的 G1 策略。只想试跑一段舞步，可以直接执行首页的 ONNX 命令。需要回放世界模型或续训时，下载并解压完整检查点。[单段试跑](../README.md#试用预训练策略) · [发布页](https://github.com/JasonG98/nanomimic/releases/tag/v0.1.0)
+
+```bash
+RELEASE=https://github.com/JasonG98/nanomimic/releases/download/v0.1.0
+DEST=runs/pretrained/v0.1.0
+mkdir -p "$DEST"
+(
+  cd "$DEST" || exit 1
+  for file in nanomimic-g1-100k.tar.gz nanomimic-g1-100k.onnx evaluation.json SHA256SUMS; do
+    curl -fLO "$RELEASE/$file" || exit 1
+  done
+  shasum -a 256 -c SHA256SUMS && tar -xzf nanomimic-g1-100k.tar.gz
+)
+CHECKPOINT="$DEST/checkpoints/00100000"
+uv run nanomimic export --checkpoint "$CHECKPOINT" --verify
+```
+
+解压后有 `actor.pt`、`critic.pt`、`world_model.pt` 和 `config.json`。上面的 CPU 数值自检无需参考动作。要在浏览器里看策略和世界模型的回放，从仓库根目录生成训练时使用的 40 段动作库，再启动 Viser。
+
+```bash
+uv run python tools/make_motion.py --all
+uv run nanomimic play --checkpoint "$CHECKPOINT" --viewer viser
+```
+
+继续这次训练时，把累计迭代上限设到 100000 以上。下面会另外训练 10000 轮并创建新的运行目录。
+
+```bash
+uv run nanomimic train --resume "$CHECKPOINT" --max-iterations 110000
+```
+
+## CPU 快速验证
 
 用仓库内的合成动作和小网络跑 12 轮，检查训练和保存流程。
 
