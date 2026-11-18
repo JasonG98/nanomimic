@@ -16,7 +16,7 @@
     </header>
     <header class="titleblock">
       <h1>跑完整段动作，<em>有多难？</em></h1>
-      <p>从 <code>lafan_run1_subject5</code> 的第 0 帧跑到末帧，共 11889 个控制步。64 个环境各算第一次尝试，摔倒或提前超时就记为失败。</p>
+      <p>从 <code>lafan_run1_subject5</code> 的第 0 帧跟踪到末帧，要连续走 11889 个控制步。64 个仿真环境各跑一次，中途摔倒或提前超时都算失败。</p>
     </header>
     <div class="spread">
       <figure class="plate">
@@ -32,10 +32,10 @@
               </defs>
               <rect width="128" height="128" fill="url(#fail)"/><path d="M0 0H128V96H80V112H0Z" fill="url(#pass)"/>
             </svg>
-            <div><div class="score">53<small> / 64</small></div><p class="score-label"><b>82.81%</b> 完整成功<br>实心为成功，斜纹为失败</p></div>
+            <div><div class="score">53<small> / 64</small></div><p class="score-label">全程成功率 <b>82.81%</b><br>实心格表示成功，斜纹格表示失败</p></div>
           </div>
           <table class="comparison">
-            <thead><tr><th scope="col">迭代</th><th scope="col">完整成功</th><th scope="col">平均存活</th><th scope="col">部位位置误差</th></tr></thead>
+            <thead><tr><th scope="col">迭代次数</th><th scope="col">跑完全程</th><th scope="col">平均跟踪时长</th><th scope="col">部位位置误差</th></tr></thead>
             <tbody>
               <tr><th scope="row">1000</th><td>0 / 64</td><td>6.60 秒</td><td>14.43 cm</td></tr>
               <tr><th scope="row">2000</th><td>0 / 64</td><td>38.45 秒</td><td>11.30 cm</td></tr>
@@ -43,17 +43,17 @@
             </tbody>
           </table>
         </div>
-        <figcaption class="fig-caption">位置误差取 14 个跟踪部位重锚定后的平均距离，统计覆盖各次尝试的存活步。前两次评估都未跑完全程，平均存活时间显示了差别。</figcaption>
+        <figcaption class="fig-caption">每一步先把参考骨盆的水平位置和偏航角与仿真中的骨盆对齐，再算 14 个部位与各自目标位置的平均距离。表中位置误差按所有尝试实际走过的步数取平均，失败的最后一步也计入。</figcaption>
       </figure>
       <aside class="sidebar">
-        <section class="note tint"><h2>T7 仍待参考策略对照</h2><p>这是截至 2026-11-18 录入实测笔记的阶段结果。效果验收还要让参考策略按同一动作、同一协议评测，比较完整成功率和平均误差，再由用户确认阈值。</p></section>
-        <details class="note extra-note" open><summary><h2>4096 环境的显存验过吗？</h2></summary><p>T0–T6 已通过。T6 在 RTX 5060 Ti 上以 <strong>2048 环境</strong>跑 50 次迭代，整卡采样峰值 4610 MiB。新默认 <strong>4096 环境</strong>的完整训练峰值待测。</p></details>
-        <details class="note extra-note" open><summary><h2>导出和回放到哪一步？</h2></summary><p>T9 的 Mac CPU 虚影回放已验。T8 的 ONNX 已过 CPU 数值自检，仍需用 T7 合格策略完成整段 sim2sim 并保持不摔倒。</p></details>
+        <section class="note tint"><h2>T7 还需要和参考策略比较</h2><p>这是截至 2026-11-18 记录的阶段结果。还要让 SuperMimic 的策略按相同条件跑同一段动作，比较全程成功率和平均跟踪误差，再由用户确认验收阈值。</p></section>
+        <details class="note extra-note" open><summary><h2>4096 个环境一起训练占多少显存？</h2></summary><p>T0–T6 已通过验收。T6 在 RTX 5060 Ti 上用 <strong>2048 个环境</strong>训练了 50 次迭代，测得整张显卡的最高显存占用为 4610 MiB。默认配置已改为 <strong>4096 个环境</strong>，完整训练的显存峰值仍待实测。</p></details>
+        <details class="note extra-note" open><summary><h2>导出和回放验证到了哪一步？</h2></summary><p>T9 已在 Mac 的 CPU 上验证了虚影回放。T8 已在 CPU 上核对 ONNX 的输出。等 T7 的策略通过验收，还要做 sim2sim 测试，用导出的 ONNX 在仿真中跟踪整段动作，全程不摔倒才算通过。</p></details>
       </aside>
     </div>
     <footer class="sources">
       <strong>对照阅读</strong>
-      <a href="../../NOTES.md">阶段评估原表</a>
+      <a href="../../NOTES.md">评估原始记录</a>
       <a href="../../../tools/evaluate_tracking.py">整段评估脚本</a>
       <a href="../../SPEC.md">验收条件</a>
     </footer>

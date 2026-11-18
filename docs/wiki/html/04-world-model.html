@@ -16,7 +16,7 @@
     </header>
     <header class="titleblock">
       <h1>怎样从动作推算<em>下一个姿势？</em></h1>
-      <p>世界模型先学“速度会变多少”。得到新速度之后，用一个控制步的时间更新位姿，再沿关节树算出手脚的位置。</p>
+      <p>世界模型先预测速度会变多少，再用新速度推算 0.02 秒后机器人的位置和姿势。知道骨盆的位置、朝向和各关节的角度，就能沿关节树算出手脚的位置。这一步叫正运动学（FK）。</p>
     </header>
     <div class="spread">
       <figure class="plate">
@@ -24,18 +24,18 @@
           <div class="fig-head"><span>世界模型的一步</span><span class="fig-no">dt = 0.02 s</span></div>
           <div class="model-layout">
             <div class="model-math">
-          <div class="representation" aria-label="68 维状态、29 维处理后动作、33 维环境上下文，拼为 130 维输入">
+          <div class="representation" aria-label="68 维模型状态、29 维关节目标和 33 维仿真参数，共 130 维输入">
             <div class="term"><b>68</b><small>模型状态</small></div><span>+</span>
             <div class="term"><b>29</b><small>关节目标¹</small></div><span>+</span>
-            <div class="term"><b>33</b><small>环境上下文</small></div>
+            <div class="term"><b>33</b><small>仿真参数</small></div>
           </div>
           <div class="model-band"><span><strong>130 维</strong> → 动力学网络</span><b>3 × 2048</b></div>
-          <p class="under-band"><strong>↓ 输出 35 个速度增量</strong><br>根线速度 3、根角速度 3、关节速度 29。</p>
-          <div class="under-band flow-inline"><strong>新速度</strong><b>→</b><strong>积分位姿</strong><b>→</b><strong>FK</strong></div>
+          <p class="under-band"><strong>↓ 输出 35 个速度增量</strong><br>骨盆的线速度和角速度各 3 项，关节角速度 29 项。</p>
+          <div class="under-band flow-inline"><strong>更新速度</strong><b>→</b><strong>积分求位姿</strong><b>→</b><strong>FK</strong></div>
             </div>
             <svg class="diagram leg" viewBox="0 0 166 215" role="img" aria-labelledby="leg-title leg-desc">
               <title id="leg-title">G1 左腿正运动学</title>
-              <desc id="leg-desc">在舞步第 3040 帧的实际姿势上标出左髋、左膝和左踝。计算子部位的位置时要先知道父部位的位姿。</desc>
+              <desc id="leg-desc">图中标出舞步第 3040 帧的左髋、左膝和左踝。沿左腿从髋关节算到膝关节，再从膝关节算到脚踝。</desc>
               <image href="assets/g1-3040.webp" width="117.6" height="200.1"/>
               <path d="M71.95 99.32 49.73 130.43 58.08 171.18" fill="none" stroke="#b44427" stroke-width="2"/>
               <g fill="none" stroke="#87462b" stroke-width="1.25"><path d="M72 99.32H119 M50 130.43H119 M59 171.18H119"/></g>
@@ -45,19 +45,19 @@
             </svg>
           </div>
         </div>
-        <figcaption class="fig-caption">¹ 原始动作乘缩放系数再加偏置。环境上下文由脚摩擦 1 维、质心偏移 3 维和编码器偏置 29 维构成。</figcaption>
+        <figcaption class="fig-caption">¹ 将原始动作乘以缩放系数，再加上偏置，就得到关节目标。33 个仿真参数包括 1 个脚底摩擦系数、3 个方向的质心偏移和 29 个关节的编码器偏置。</figcaption>
       </figure>
       <aside class="sidebar">
         <section class="note tint"><h2>只看一个膝关节</h2><p>示例角度 0.40 rad，角速度 1.0 rad/s。网络预测本步增加 0.5 rad/s，新角速度就是 1.5 rad/s。</p><p class="under-band"><strong>新角度 = 0.40 + 0.02 × 1.5 = 0.43 rad</strong></p></section>
-        <details class="note extra-note" open><summary><h2>根位姿从哪里来？</h2></summary><p>71 维完整状态转成 68 维模型表示，保留根高度、机体系重力与速度、关节角度与速度。根位置和四元数另存为 7 维，随步积分。FK 沿树计算后取 14 个跟踪部位。</p></details>
-        <details class="note extra-note" open><summary><h2>什么算“预测得准”？</h2></summary><p>根位置、根朝向、关节位置与速度各有名义误差。Bryson 权重取其平方的倒数，让米、弧度等不同单位可以共同计入损失。</p></details>
+        <details class="note extra-note" open><summary><h2>怎样知道骨盆的位置和朝向？</h2></summary><p>先把 71 维完整状态转成网络要读的 68 维，保留骨盆高度、机身坐标系下的重力方向和速度，以及关节角度和角速度。骨盆的位置（3 维）和朝向四元数（4 维）单独保存，每步按新速度更新。正运动学由此算出 14 个跟踪部位的状态。</p></details>
+        <details class="note extra-note" open><summary><h2>怎样衡量预测误差？</h2></summary><p>骨盆的位置、朝向、关节的角度和角速度各有一个参考误差。按 Bryson 规则，每项误差先除以对应的参考值，再平方。这样就能把单位不同的误差合在一起计算损失。</p></details>
       </aside>
     </div>
     <footer class="sources">
       <strong>对照阅读</strong>
       <a href="../../../src/nanomimic/models/model.py">积分与正运动学</a>
       <a href="../../../src/nanomimic/training/learning.py">加权损失</a>
-      <a href="../../../tests/test_model.py">对拍测试</a>
+      <a href="../../../tests/test_model.py">与参考结果比较的测试</a>
     </footer>
   </main>
   <nav class="page-nav" aria-label="海报导航">

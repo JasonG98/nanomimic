@@ -16,7 +16,7 @@
     </header>
     <header class="titleblock">
       <h1>训练结束后，<em>哪些部分还在工作？</em></h1>
-      <p>回放同时运行物理仿真和世界模型，用虚影观察预测怎样偏离。导出则把做决策的 Actor 和一份参考动作库装进 ONNX。</p>
+      <p>回放时，半透明的 G1 显示世界模型预测的姿势。它和仿真中的 G1 越走越远，就说明预测误差在累积。导出的 ONNX 文件包含 Actor 和参考动作库。</p>
     </header>
     <div class="spread">
       <figure class="plate">
@@ -24,27 +24,27 @@
           <div class="fig-head"><span>回放时的两条闭环</span><span class="fig-no">play · env 0</span></div>
           <div class="lanes">
             <div><strong>物理仿真</strong><div class="lane">
-              <span><b>仿真观测</b><small>历史与目标</small></span><span class="arrow">→</span>
-              <span><b>Actor</b><small>本侧动作</small></span><span class="arrow">→</span>
-              <span><b>仿真步进</b><small>下一帧观测 ↺</small></span>
+              <span><b>仿真观测</b><small>最近几帧与目标</small></span><span class="arrow">→</span>
+              <span><b>Actor</b><small>按仿真观测选动作</small></span><span class="arrow">→</span>
+              <span><b>仿真推进</b><small>下一帧观测 ↺</small></span>
             </div></div>
             <div><strong>预测虚影</strong><div class="lane pred">
-              <span><b>合成观测</b><small>预测历史与目标</small></span><span class="arrow">→</span>
-              <span><b>Actor</b><small>本侧动作</small></span><span class="arrow">→</span>
-              <span><b>模型步进</b><small>下一帧观测 ↺</small></span>
+              <span><b>合成观测</b><small>最近几帧与目标</small></span><span class="arrow">→</span>
+              <span><b>Actor</b><small>按合成观测选动作</small></span><span class="arrow">→</span>
+              <span><b>模型预测</b><small>下一帧观测 ↺</small></span>
             </div></div>
           </div>
-          <div class="sync-line">回合结束或到达指定周期时重新对齐</div>
+          <div class="sync-line">回合结束或达到设定步数时，虚影与仿真重新对齐</div>
         </div>
-        <figcaption class="fig-caption">两侧共用 Actor 权重，各自取目标、维护带噪历史并计算动作。两条轨迹之间的距离显示预测在闭环中怎样累积偏差。</figcaption>
+        <figcaption class="fig-caption">两条轨迹使用同一个 Actor，各自保存加过噪声的观测。虚影每走一步，都根据自己的预测状态重新算目标和动作。</figcaption>
       </figure>
       <aside class="sidebar">
-        <section class="note"><h2>ONNX 的两个入口</h2><dl class="ledger">
-          <dt><code>obs</code></dt><dd>调用方提供 <code>[1, 93H + 640]</code>。图内把按传感器分组的历史转成按帧排列，Actor 输出 <code>actions [1, 29]</code>。</dd>
-          <dt><code>time_step</code></dt><dd>形状 <code>[1, 1]</code>，只查询内嵌动作库。返回关节位置、速度，以及部位的位置、四元数、线速度、角速度。</dd>
+        <section class="note"><h2>ONNX 的两个输入</h2><dl class="ledger">
+          <dt><code>obs</code></dt><dd><code>[1, 93H + 640]</code>。最近 <code>H</code> 帧观测按传感器分组输入，图内再按帧排列。Actor 结合目标输出关节指令 <code>actions [1, 29]</code>。</dd>
+          <dt><code>time_step</code></dt><dd><code>[1, 1]</code>。按帧号读取关节角度和角速度，以及各部位的位置、朝向四元数、线速度和角速度。</dd>
         </dl></section>
-        <details class="note extra-note" open><summary><h2>哪段动作能导出？</h2></summary><p>导出读取检查点配置中的动作文件，总帧数上限 <strong>15000</strong>。查询时间会被限制在有效帧内。40 段合并训练库共 441120 帧，超过上限。</p></details>
-        <details class="note tint extra-note" open><summary><h2>导出自检看什么？</h2></summary><p><code>--verify</code> 在 CPU 上比较动作误差（要求 &lt;10⁻⁴），并逐元素核对六项参考量。完整动作的 ONNX 闭环跟踪另行验收。</p></details>
+        <details class="note extra-note" open><summary><h2>哪段动作能导出？</h2></summary><p>导出时读取检查点指定的动作文件，最多支持 <strong>15000</strong> 帧。40 段合并后共 441120 帧，超过上限。查询时，负帧号取首帧，超过末尾取末帧。</p></details>
+        <details class="note tint extra-note" open><summary><h2>导出后怎样核对结果？</h2></summary><p><code>--verify</code> 在 CPU 上比较 ONNX 和 PyTorch 的关节指令，最大绝对误差须小于 10⁻⁴。还会检查六组参考数据是否与动作库逐项相等。能否跑完全程，要在仿真里检验。</p></details>
       </aside>
     </div>
     <footer class="sources">

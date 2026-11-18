@@ -16,7 +16,7 @@
     </header>
     <header class="titleblock">
       <h1>下一步，<em>策略看得见什么？</em></h1>
-      <p>Actor 同时读取身体最近的感受和动作库接下来的姿势。前者给出“我现在怎样”，后者给出“接下来要怎样”。</p>
+      <p>Actor 根据最近几帧的观测判断机器人现在怎样运动，再看动作库里接下来要跟踪的姿势，决定下一步怎样动。</p>
     </header>
     <div class="spread">
       <figure class="plate" id="frame-demo">
@@ -29,15 +29,15 @@
           <ol class="frame-list" aria-label="按顺序取到的十个目标帧">
             <li>35</li><li>40</li><li>45</li><li>50</li><li>55</li><li class="held">59</li><li class="held">59</li><li class="held">59</li><li class="held">59</li><li class="held">59</li>
           </ol>
-          <p class="brief" id="frame-hint">示例片段共 60 帧。斜纹格原本会越界，统一取这一段的末帧。</p>
+          <p class="brief" id="frame-hint">这段动作共 60 帧，帧号从 0 开始。斜纹格对应的帧号超过了 59，所以都取第 59 帧。</p>
           <div class="window-parts"><strong>每帧提供 29 个关节位置和 29 个关节速度</strong><span class="equation">10 × (29 + 29) = 580</span></div>
         </div>
         <figcaption class="fig-caption">第一格就是当前帧。片段足够长时，第十格在 45 个控制步之后，覆盖未来 0.9 秒。</figcaption>
       </figure>
       <aside class="sidebar">
-        <section class="note"><h2>身体感觉 <span class="mono">93</span> 维 / 帧</h2><p>投影重力 3、基座角速度 3、相对关节位置 29、关节速度 29、上一动作 29。历史保留最近 <code>H</code> 帧，默认 1 帧。回合重置时用同一帧带噪观测填满历史。</p></section>
-        <details class="note extra-note" open><summary><h2>参考目标从 670 维变为 640 维</h2></summary><p>完整目标还含相对位置 30 维、相对朝向 60 维。Actor 保留关节内容与相对朝向，共 <strong>580 + 60</strong> 维。</p></details>
-        <details class="note tint extra-note" open><summary><h2>两路信号合成 29 个动作</h2></summary><p>目标先编码成 32 维，再与 <code>93 × H</code> 维身体历史拼接，解码为 29 个关节指令。仿真采集和想象使用同一个传感器加噪函数。</p></details>
+        <section class="note"><h2>每帧观测有 <span class="mono">93</span> 个数</h2><p>机身坐标系下的重力方向和角速度各 3 个数，关节相对默认姿势的角度、关节角速度和上一步的指令各 29 个。保留最近 <code>H</code> 帧，默认 1 帧。新回合开始时，重复使用加过一次噪声的首帧来补齐记录。</p></section>
+        <details class="note extra-note" open><summary><h2>参考目标从 670 维变为 640 维</h2></summary><p>完整目标还含 30 维相对位置和 60 维相对朝向。Actor 读取关节角度、关节角速度和相对朝向，共 <strong>580 + 60</strong> 维。</p></details>
+        <details class="note tint extra-note" open><summary><h2>怎样给 29 个关节发指令？</h2></summary><p>Actor 把目标编码成 32 个数，再与最近 <code>H</code> 帧的观测（共 <code>93 × H</code> 个数）拼在一起，算出 29 个关节指令。仿真采集和模型推演都用同一个函数给观测加噪声。</p></details>
       </aside>
     </div>
     <footer class="sources">

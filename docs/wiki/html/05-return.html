@@ -16,12 +16,12 @@
     </header>
     <header class="titleblock">
       <h1>快要摔倒，<em>未来还值多少分？</em></h1>
-      <p>想象中的一步既要评估动作像不像，也要估计 G1 还能撑多久。越接近失衡，后面那些好动作对当前决策的分量就越轻。</p>
+      <p>模型每推演一步，都要看 G1 的动作和参考动作有多像，并估计这一回合有多大概率会在这里结束。越接近失衡，后续奖励对当前动作的影响就越小。</p>
     </header>
     <div class="spread">
       <figure class="plate" id="risk-demo">
         <div class="plate-inner grid-paper">
-          <div class="fig-head"><span>误差越过阈值时的软终止</span><span class="fig-no">p = sigmoid((e − 1) / 0.05)</span></div>
+          <div class="fig-head"><span>误差多大时，回合容易结束？</span><span class="fig-no">p = sigmoid((e − 1) / 0.05)</span></div>
           <div class="chart-wrap">
             <svg class="diagram chart" viewBox="0 0 500 191" role="img" aria-labelledby="risk-title risk-desc">
               <title id="risk-title">归一化误差与终止概率的关系</title>
@@ -37,17 +37,17 @@
           </div>
           <div class="plot-readout">
             <span>误差 <output for="risk-input" id="risk-value">1.00</output></span>
-            <span>本步终止 <output for="risk-input" id="risk-prob">50.0%</output></span>
-            <span>继续存活 <output for="risk-input" id="risk-survive">50.0%</output></span>
+            <span>结束概率 <output for="risk-input" id="risk-prob">50.0%</output></span>
+            <span>继续概率 <output for="risk-input" id="risk-survive">50.0%</output></span>
           </div>
           <div class="live-control" hidden><input type="range" id="risk-input" aria-label="用于计算终止概率的归一化误差" min="0.8" max="1.2" step="0.01" value="1"></div>
         </div>
-        <figcaption class="fig-caption">把骨盆高度误差、倾斜误差各自除以对应阈值，取较大者为 <code>e</code>。阈值处 <code>p = 0.5</code>，下一步仍存活的权重减半。</figcaption>
+        <figcaption class="fig-caption">把骨盆高度误差和倾斜误差分别除以各自的阈值，取较大者为 <code>e</code>。当 <code>e = 1</code> 时，本步结束的概率为 50%，下一步奖励的权重也因此减半。</figcaption>
       </figure>
       <aside class="sidebar">
         <section class="note"><h2>先给姿势打分</h2><p>骨盆位置和朝向在世界坐标系直接比较。比较各部位姿态时，先把参考动作的水平位置和偏航对齐到预测骨盆，保留参考的高度与倾斜。</p></section>
-        <details class="note extra-note" open><summary><h2>再看运动是否顺畅</h2></summary><p>另外比较各部位的线速度、角速度，扣除动作突变与关节越限。六项正奖励的权重合计 5，乘控制步长后每步上限为 0.10。</p></details>
-        <details class="note tint extra-note" open><summary><h2>把 32 步合成一次回报</h2></summary><p>每步奖励乘以时间折扣及此前累积的存活概率。末端再加上同样折扣后的价值估计，Actor 据此更新。价值网络（Critic）读取 68 维状态、640 维目标和 33 维环境信息，以广义优势估计（GAE）构造训练目标。</p></details>
+        <details class="note extra-note" open><summary><h2>再看运动是否顺畅</h2></summary><p>还要比较各部位的线速度和角速度。相邻两步的指令变化越大，或关节超出软限位越多，扣分就越多。六项正奖励的权重合计为 5，乘以控制步长后，每步最多得 0.10 分。</p></details>
+        <details class="note tint extra-note" open><summary><h2>怎样算 32 步的总回报？</h2></summary><p>每步奖励都乘以时间折扣和回合持续到该步的概率。32 步之后的回报由价值网络（Critic）估计，也按时间和继续跟踪的概率加权。Actor 根据总回报更新。Critic 读取 68 维状态、640 维目标和 33 维仿真参数，用广义优势估计（GAE）计算训练目标。</p></details>
       </aside>
     </div>
     <footer class="sources">

@@ -16,15 +16,15 @@
     </header>
     <header class="titleblock">
       <h1>仿真走一步，<em>模型能推演多远？</em></h1>
-      <p>策略（Actor）给关节下指令，物理仿真记录 G1 的响应。连续几帧可以教模型预测，取其中一帧又可以让策略尝试接下来的动作。</p>
+      <p>策略（Actor）给关节发指令，仿真器记录 G1 怎样运动。模型用连续几帧学习预测，策略也可以从其中一帧出发，在模型里尝试接下来的动作。</p>
     </header>
     <div class="spread">
       <figure class="plate training-figure">
         <div class="plate-inner blueprint">
           <div class="fig-head"><span>一条轨迹的两种用法</span><span class="fig-no">1 → 8 / 32</span></div>
           <svg class="diagram" viewBox="0 0 602 263" role="img" aria-labelledby="flow-title flow-desc">
-            <title id="flow-title">物理采集、世界模型拟合和想象构成训练闭环</title>
-            <desc id="flow-desc">物理仿真每次前进一步，轨迹进入回放缓冲。连续九帧用于拟合八步，单帧起点和历史用于三十二步想象。更新后的策略回到仿真采集。</desc>
+            <title id="flow-title">一段仿真记录如何用于训练模型和策略</title>
+            <desc id="flow-desc">仿真器每走一步就把记录写入缓冲区。用连续九帧训练模型预测八步，也可以从一帧及其观测历史出发，让策略在模型中尝试三十二步。更新后的策略继续在仿真中采集数据。</desc>
             <defs>
               <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 10 5 0 10Z" fill="#cddbcc"/></marker>
               <marker id="return-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 10 5 0 10Z" fill="#fa906c"/></marker>
@@ -38,33 +38,33 @@
               <rect x="3" y="78" width="126" height="65" fill="#eff1dd"/><rect x="180" y="78" width="123" height="65" fill="#eff1dd"/>
               <rect x="433" y="18" width="148" height="64" fill="#e4edcf"/><rect x="433" y="138" width="148" height="64" fill="#f3d46e"/>
               <g color="#19392f">
-                <text x="66" y="106" class="node-title">物理仿真</text><text x="66" y="127" class="node-sub">Actor 出动作</text>
-                <text x="242" y="106" class="node-title">回放缓冲</text><text x="242" y="127" class="node-sub">每环境 1000 步</text>
+                <text x="66" y="106" class="node-title">物理仿真</text><text x="66" y="127" class="node-sub">Actor 选动作</text>
+                <text x="242" y="106" class="node-title">回放缓冲区</text><text x="242" y="127" class="node-sub">每个环境 1000 步</text>
                 <text x="507" y="46" class="node-title">拟合动力学</text><text x="507" y="67" class="node-sub">预测 8 步</text>
                 <text x="507" y="166" class="node-title">改进策略</text><text x="507" y="187" class="node-sub">想象 32 步</text>
               </g>
-              <g class="node-sub"><text x="152" y="98">写入</text><text x="374" y="41">连续 9 帧</text><text x="376" y="158">起点和历史</text><text x="551" y="114">模型固定</text></g>
-              <text x="279" y="250" color="#ffc5a4" font-size="15">更新后的 Actor 回到仿真采集</text>
+              <g class="node-sub"><text x="152" y="98">写入</text><text x="374" y="41">连续 9 帧</text><text x="376" y="158">起点和历史</text><text x="551" y="114">固定参数</text></g>
+              <text x="279" y="250" color="#ffc5a4" font-size="15">用更新后的 Actor 继续采集轨迹</text>
             </g>
           </svg>
           <ol class="narrow-flow">
-            <li>物理仿真走 1 步，写入回放缓冲。</li>
-            <li><strong>连续 9 帧</strong> → 用记录的动作拟合 8 步。</li>
-            <li><strong>起点和历史</strong> → 在学好的模型里想象 32 步。</li>
-            <li>更新后的 Actor 回到仿真采集。</li>
+            <li>物理仿真走 1 步，把记录写入缓冲区。</li>
+            <li><strong>连续 9 帧</strong> → 用记录中的动作预测后 8 帧。</li>
+            <li><strong>起点和观测历史</strong> → 让策略在模型里尝试 32 步。</li>
+            <li>用更新后的 Actor 继续采集轨迹。</li>
           </ol>
         </div>
         <figcaption class="fig-caption">拟合时，模型依次执行记录中的动作。想象时，Actor 根据每一步的预测状态重新决定动作。</figcaption>
       </figure>
       <aside class="sidebar">
-        <section class="note"><h2>8 步，学动作的后果</h2><p>选取同一回合内的连续状态，从首帧向前预测。后面 8 帧的仿真状态给世界模型提供监督。</p></section>
+        <section class="note"><h2>8 步，学会预测</h2><p>从同一回合取连续 9 帧。模型从第 1 帧开始，按记录中的动作预测后 8 帧，再把每一步的预测与仿真记录比较。</p></section>
         <details class="note extra-note" open><summary><h2>32 步，找更好的动作</h2></summary><p>默认推演 0.64 秒。回报的梯度沿预测链传回 Actor。此时世界模型与价值网络的参数固定，仍保留对输入的导数。</p></details>
-        <details class="note tint extra-note" open><summary><h2>多久更新一次？</h2></summary><p>默认 4096 个环境，每次采集累积 <strong>0.4 轮</strong>训练额度。缓冲可采样且额度满一轮时，先拟合模型，再改进策略。</p></details>
+        <details class="note tint extra-note" open><summary><h2>多久更新一次？</h2></summary><p>默认同时运行 4096 个环境，平均每采集 <strong>5 次</strong>训练 <strong>2 轮</strong>。缓冲区里有同一回合的连续 9 帧后才开始训练，每轮先拟合模型，再改进策略。</p></details>
       </aside>
     </div>
     <footer class="sources">
       <strong>对照阅读</strong>
-      <a href="../../../src/nanomimic/training/train.py">采集与排程</a>
+      <a href="../../../src/nanomimic/training/train.py">采集与训练调度</a>
       <a href="../../../src/nanomimic/rollout/buffer.py">缓冲采样</a>
       <a href="../../../src/nanomimic/training/learning.py">拟合与策略更新</a>
       <a href="../../../src/nanomimic/training/config.py">默认配置</a>
