@@ -154,8 +154,9 @@ def test_real_native_ghost_drawing_and_model_isolation(ghost: GhostRollout) -> N
 
 
 def test_play_cli_and_invalid_rollout(sim: Sim) -> None:
-    command = parse_command(["play", "--checkpoint", "runs/100", "--viewer", "viser", "--num-steps-rollout", "5"])
+    checkpoint = "runs/g1/20261118_120000/checkpoints/00000100"
+    command = parse_command(["play", "--checkpoint", checkpoint, "--viewer", "viser", "--num-steps-rollout", "5"])
     assert isinstance(command, PlayCmd) and command.viewer == "viser" and command.num_steps_rollout == 5
-    assert PlayCmd(Path("runs/100")).num_steps_rollout == 1_000_000
+    assert PlayCmd(Path(checkpoint)).num_steps_rollout == 1_000_000
     with pytest.raises(ValueError, match="num_steps_rollout"):
         GhostRollout(sim, Actor(29, ActorConfig(hidden=(8,))), Dynamics(sim.robot, 33, DynamicsConfig((8,))), 0)

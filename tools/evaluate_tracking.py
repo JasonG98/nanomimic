@@ -1,4 +1,4 @@
-"""T7 单段动作的无窗口闭环评估。
+"""用 PyTorch 检查点或纯 Actor ONNX 闭环评估单段外置动作。
 
 每个环境只计从第 0 帧开始的首次尝试，失败后的重置不进入统计。
 关闭探索噪声和初态扰动，保留三项域随机化与统一传感器噪声。
@@ -19,7 +19,8 @@ from nanomimic.common.specs import Obs, SimConfig
 from nanomimic.models.policy import Actor
 from nanomimic.rollout.imagine import actor_goal
 from nanomimic.rollout.sensor import HistoryRing, add_noise
-from nanomimic.runtime.paths import resolve_checkpoint, run_directory
+from nanomimic.runtime.inference import OnnxActor
+from nanomimic.runtime.paths import run_directory
 from nanomimic.runtime.sim import Sim
 from nanomimic.training.checkpoints import load_weights
 from nanomimic.training.config import load_config
@@ -27,8 +28,8 @@ from nanomimic.training.config import load_config
 
 @dataclass(frozen=True)
 class Config:
-    # 含 config.json 与 actor.pt 的检查点目录。
-    checkpoint: Path
+    # 检查点路径 <运行目录>/checkpoints/<迭代号>，与 --onnx 二选一。
+    checkpoint: Path | None = None
     # 独立评估的并行尝试数，每行使用不同的域随机化与传感器噪声。
     num_envs: int = 64
     # 评估设备；CPU 可用于功能验证。
@@ -37,6 +38,10 @@ class Config:
     seed: int = 0
     # JSON 结果路径；默认放在运行目录的 evaluations/，不覆盖已有结果。
     out: Path | None = None
+    # 纯 Actor ONNX 路径，在 CPU 上运行。
+    onnx: Path | None = None
+    # 单段参考动作，使用 ONNX 时须提供。
+    motion_file: Path | None = None
 
 
 class TrackingScore:
@@ -103,7 +108,7 @@ def _reset_at_start(sim: Sim, rows: Tensor | None = None) -> Obs:
 
 
 @torch.no_grad()
-def evaluate_policy(sim: Sim, actor: Actor) -> dict[str, Any]:
+def evaluate_policy(sim: Sim, actor: Actor | OnnxActor) -> dict[str, Any]:
     """从动作首帧跑到末帧，返回独立首次尝试的统计，不更新模型及归一化。"""
     if sim.motion.clip_ends.numel() != 1 or sim.motion.num_frames < 2:
         raise ValueError("完整动作评估需要至少两帧的单片段动作文件")
@@ -115,7 +120,8 @@ def evaluate_policy(sim: Sim, actor: Actor) -> dict[str, Any]:
     sim._env.cfg.episode_length_s = (sim.motion.num_frames + 1) * sim.robot.dt
     sim._env.cfg.auto_reset = False
     obs = _reset_at_start(sim)
-    actor.eval()
+    if isinstance(actor, Actor):
+        actor.eval()
     history = HistoryRing(actor.history_length)
     history.push(add_noise(obs.sensor))
     command._update_metrics()
@@ -143,34 +149,58 @@ def evaluate_policy(sim: Sim, actor: Actor) -> dict[str, Any]:
 
 
 def evaluate(cfg: Config) -> Path:
-    """加载单个策略检查点并写入可供跨检查点对比的 JSON。"""
+    """加载 Actor 与参考动作，写入可供对比的评估 JSON。"""
     if cfg.num_envs < 1:
         raise ValueError("评估尝试数必须大于零")
-    checkpoint = resolve_checkpoint(cfg.checkpoint)
-    out = cfg.out or run_directory(checkpoint) / "evaluations" / f"eval-{checkpoint.name}-seed{cfg.seed}.json"
+    if (cfg.checkpoint is None) == (cfg.onnx is None):
+        raise ValueError("请在 --checkpoint 和 --onnx 中指定一个")
+    checkpoint = cfg.checkpoint
+    if checkpoint is None:
+        assert cfg.onnx is not None
+        if cfg.motion_file is None:
+            raise ValueError("评估 ONNX 需要 --motion-file 指定外置动作")
+        train_cfg = None
+        model_file = cfg.onnx
+        motion_file = cfg.motion_file
+        run = model_file.parent.parent if model_file.parent.name == "exports" else model_file.parent
+        label = f"{model_file.stem}-onnx-{motion_file.stem}"
+    else:
+        train_cfg = load_config(checkpoint)
+        model_file = checkpoint / "actor.pt"
+        motion_file = cfg.motion_file or train_cfg.motion_file
+        if motion_file is None:
+            raise ValueError("检查点缺少 motion_file")
+        run = run_directory(checkpoint)
+        label = checkpoint.name if cfg.motion_file is None else f"{checkpoint.name}-{motion_file.stem}"
+    out = cfg.out or run / "evaluations" / f"eval-{label}-seed{cfg.seed}.json"
     if out.exists():
         raise FileExistsError(f"评估文件已存在，拒绝覆盖：{out}")
-    train_cfg = load_config(checkpoint)
-    if train_cfg.motion_file is None:
-        raise ValueError("检查点缺少 motion_file")
     torch.manual_seed(cfg.seed)
     torch.set_float32_matmul_precision("high")
-    with Sim(SimConfig(train_cfg.motion_file, cfg.num_envs, cfg.device, cfg.seed)) as sim:
-        actor = Actor(len(sim.robot.joint_names), train_cfg.actor).to(sim.device)
-        iteration = load_weights(checkpoint, "actor", actor, sim.device)
+    with Sim(SimConfig(motion_file, cfg.num_envs, cfg.device, cfg.seed)) as sim:
+        if checkpoint is not None and train_cfg is not None:
+            actor = Actor(len(sim.robot.joint_names), train_cfg.actor).to(sim.device)
+            iteration = load_weights(checkpoint, "actor", actor, sim.device)
+        else:
+            actor = OnnxActor(model_file)
+            if actor.joint_names != sim.robot.joint_names:
+                raise ValueError("ONNX 关节顺序与 G1 资产不一致")
+            iteration = actor.iteration
         # 初始化网络消耗 RNG；评估噪声从独立的固定种子开始。
         torch.manual_seed(cfg.seed)
         result = evaluate_policy(sim, actor)
         result.update(
             schema_version=1,
-            checkpoint=str(checkpoint.resolve()),
+            checkpoint=str(checkpoint.resolve()) if checkpoint is not None else None,
+            onnx=str(model_file.resolve()) if cfg.onnx is not None else None,
             iteration=iteration,
-            motion_file=str(train_cfg.motion_file.resolve()),
-            motion_sha256=hashlib.sha256(train_cfg.motion_file.read_bytes()).hexdigest(),
-            actor_sha256=hashlib.sha256((checkpoint / "actor.pt").read_bytes()).hexdigest(),
+            motion_file=str(motion_file.resolve()),
+            motion_sha256=hashlib.sha256(motion_file.read_bytes()).hexdigest(),
+            actor_sha256=hashlib.sha256(model_file.read_bytes()).hexdigest(),
             protocol={
                 "seed": cfg.seed,
                 "device": cfg.device,
+                "actor_backend": "onnxruntime_cpu" if cfg.onnx is not None else "pytorch",
                 "torch_version": torch.__version__,
                 "sampling_mode": "start",
                 "initial_state_perturbation": False,

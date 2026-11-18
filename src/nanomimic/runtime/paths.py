@@ -1,8 +1,7 @@
-"""运行产物的目录约定与旧检查点路径兼容。
+"""运行产物的目录约定与 JSON 原子写入。
 
-新检查点放在运行目录的 checkpoints/ 下，评估与导出使用各自子目录。
-旧的运行目录/迭代号参数仍可定位迁移后的检查点，不修改历史配置。
-JSON 元信息先写临时文件再替换；本模块不加载模型或仿真器。
+检查点放在运行目录的 checkpoints/ 下，评估与导出使用各自子目录。
+JSON 元信息先写临时文件再替换。
 """
 
 import json
@@ -11,21 +10,11 @@ from tempfile import TemporaryDirectory
 from typing import Any
 
 
-def resolve_checkpoint(directory: Path) -> Path:
-    """兼容原地保留的旧检查点，以及已移入 checkpoints/ 的旧路径。"""
-    if (directory / "config.json").is_file():
-        return directory
-    for parent in (directory.parent, directory.parent / "legacy"):
-        candidate = parent / "checkpoints" / directory.name
-        if (candidate / "config.json").is_file():
-            return candidate
-    return directory
-
-
 def run_directory(checkpoint: Path) -> Path:
-    """从新旧检查点路径得到所属运行目录。"""
-    checkpoint = resolve_checkpoint(checkpoint)
-    return checkpoint.parent.parent if checkpoint.parent.name == "checkpoints" else checkpoint.parent
+    """校验检查点目录结构并返回所属运行目录。"""
+    if checkpoint.parent.name != "checkpoints" or not checkpoint.name.isdecimal():
+        raise ValueError(f"检查点目录应为 <运行目录>/checkpoints/<迭代号>：{checkpoint}")
+    return checkpoint.parent.parent
 
 
 def write_json(path: Path, value: dict[str, Any]) -> None:

@@ -66,11 +66,16 @@ def test_real_training_schedule_and_resume(tmp_path: Path) -> None:
         assert {path.name for path in saved.iterdir()} == {"world_model.pt", "actor.pt", "critic.pt", "config.json"}
         assert load_config(saved).actor == cfg.actor
         assert json.loads((saved / "config.json").read_text())["schema_version"] == 1
+        flat_checkpoint = trainer.output / saved.name
+        flat_checkpoint.mkdir()
+        (flat_checkpoint / "config.json").write_bytes((saved / "config.json").read_bytes())
+        with pytest.raises(ValueError, match="检查点目录应为"):
+            parse_command(["train", "--resume", str(flat_checkpoint)])
         command = parse_command(
             [
                 "train",
                 "--resume",
-                str(trainer.output / saved.name),
+                str(saved),
                 "--max-iterations",
                 "8",
                 "--output",

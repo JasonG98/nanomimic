@@ -11,14 +11,14 @@ from tempfile import TemporaryDirectory
 import torch
 from torch import nn
 
-from nanomimic.runtime.paths import resolve_checkpoint, write_json
+from nanomimic.runtime.paths import run_directory, write_json
 from nanomimic.training.config import TrainConfig, config_dict
 from nanomimic.training.optim import Optimizers
 
 
 def load_weights(directory: Path, name: str, model: nn.Module, device: torch.device) -> int:
     """推理只读取权重与归一化，不恢复优化器或全局 RNG；返回迭代号。"""
-    directory = resolve_checkpoint(directory)
+    run_directory(directory)
     payload = torch.load(directory / f"{name}.pt", map_location=device, weights_only=True)
     if payload.get("schema_version") != 1 or not isinstance(payload.get("iteration"), int):
         raise ValueError(f"{name} 检查点的版本或迭代号无效")
@@ -32,6 +32,7 @@ def load_weights(directory: Path, name: str, model: nn.Module, device: torch.dev
 def save_checkpoint(
     directory: Path, cfg: TrainConfig, models: dict[str, tuple[nn.Module, Optimizers]], progress: dict[str, int | float]
 ) -> None:
+    run_directory(directory)
     if directory.exists():
         raise FileExistsError(f"检查点目录已存在，拒绝覆盖：{directory}")
     directory.parent.mkdir(parents=True, exist_ok=True)
@@ -53,14 +54,13 @@ def save_checkpoint(
             json.dumps(config_dict(cfg), ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
         )
         stage.rename(directory)
-    if directory.parent.name == "checkpoints":
-        write_json(directory.parent / "index.json", {"schema_version": 1, "latest": directory.name})
+    write_json(directory.parent / "index.json", {"schema_version": 1, "latest": directory.name})
 
 
 def load_checkpoint(
     directory: Path, models: dict[str, tuple[nn.Module, Optimizers]], device: torch.device
 ) -> dict[str, int | float]:
-    directory = resolve_checkpoint(directory)
+    run_directory(directory)
     payloads = {name: torch.load(directory / f"{name}.pt", map_location=device, weights_only=True) for name in models}
     versions = {value.get("schema_version") for value in payloads.values()}
     iterations = {value.get("iteration") for value in payloads.values()}

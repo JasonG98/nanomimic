@@ -90,16 +90,25 @@ def test_real_cpu_full_clip_protocol_and_frozen_actor(tmp_path: Path) -> None:
         assert torch.isfinite(obs.full_state).all()
     with Sim(replace(cfg, motion_file=source)) as sim, pytest.raises(ValueError, match="单片段"):
         evaluate_policy(sim, actor)
-    # 保存独立推理检查点，通过旧路径调用入口，默认产物必须归入新子目录。
+    # 用同一检查点评估 PyTorch 与 ONNX，检查产物的默认路径。
     checkpoint = tmp_path / "run/checkpoints/00000007"
     checkpoint.mkdir(parents=True)
     (checkpoint / "config.json").write_text(
         json.dumps(config_dict(TrainConfig(motion_file=motion_file, actor=actor_cfg)))
     )
     torch.save({"schema_version": 1, "iteration": 7, "model": actor.state_dict()}, checkpoint / "actor.pt")
-    old_path = checkpoint.parent.parent / checkpoint.name
-    result_path = evaluation["evaluate"](evaluation["Config"](checkpoint=old_path, num_envs=2, device="cpu"))
+    result_path = evaluation["evaluate"](evaluation["Config"](checkpoint=checkpoint, num_envs=2, device="cpu"))
     assert result_path == tmp_path / "run/evaluations/eval-00000007-seed0.json"
     assert json.loads(result_path.read_text())["checkpoint"] == str(checkpoint)
-    export(old_path, verify=True)
-    assert (tmp_path / "run/exports/actor-00000007.onnx").is_file()
+    export(checkpoint, verify=True)
+    model = tmp_path / "run/exports/actor-00000007.onnx"
+    onnx_path = evaluation["evaluate"](
+        evaluation["Config"](onnx=model, motion_file=motion_file, num_envs=2, device="cpu")
+    )
+    assert onnx_path == tmp_path / "run/evaluations/eval-actor-00000007-onnx-single-seed0.json"
+    result = json.loads(onnx_path.read_text())
+    assert result["onnx"] == str(model)
+    assert result["motion_file"] == str(motion_file)
+    assert result["iteration"] == 7
+    assert result["expected_steps"] == 95
+    assert result["protocol"]["actor_backend"] == "onnxruntime_cpu"

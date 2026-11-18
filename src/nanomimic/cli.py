@@ -33,7 +33,7 @@ class TrainCmd(TrainConfig):
 class PlayCmd:
     """用检查点回放策略，同时叠加 env 0 的世界模型闭环虚影。"""
 
-    # 含 config.json、actor.pt 与 world_model.pt 的检查点目录。
+    # 检查点路径 <运行目录>/checkpoints/<迭代号>，含配置、Actor 与世界模型。
     checkpoint: Path
     # 原生窗口或 Viser 浏览器窗口。
     viewer: Literal["native", "viser"] = "native"
@@ -47,13 +47,13 @@ class PlayCmd:
 
 @dataclass(frozen=True)
 class ExportCmd:
-    """把 Actor 与动作库导出为 ONNX，可执行 CPU 数值一致性自检。"""
+    """将 Actor 导出为 ONNX，可执行 CPU 数值一致性自检。"""
 
-    # 含 config.json 与 actor.pt 的检查点目录。
+    # 检查点路径 <运行目录>/checkpoints/<迭代号>，含配置与 Actor。
     checkpoint: Path
     # 单文件 ONNX 路径；省略时写入运行目录的 exports/actor-迭代号.onnx。
     out: Path | None = None
-    # 对照 PyTorch Actor 与原始动作库执行 CPU 数值自检。
+    # 对照 PyTorch Actor 执行 CPU 数值自检。
     verify: bool = False
 
 

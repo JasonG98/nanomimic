@@ -16,7 +16,7 @@
     </header>
     <header class="titleblock">
       <h1>训练结束后，<em>哪些部分还在工作？</em></h1>
-      <p>回放时，半透明的 G1 显示世界模型预测的姿势。它和仿真中的 G1 越走越远，就说明预测误差在累积。导出的 ONNX 文件包含 Actor 和参考动作库。</p>
+      <p>回放时，半透明的 G1 显示世界模型预测的姿势。它和仿真中的 G1 越走越远，就说明预测误差在累积。导出的 ONNX 保存 Actor，参考动作从外置文件读入。</p>
     </header>
     <div class="spread">
       <figure class="plate">
@@ -39,23 +39,23 @@
         <figcaption class="fig-caption">两条轨迹使用同一个 Actor，各自保存加过噪声的观测。虚影每走一步，都根据自己的预测状态重新算目标和动作。</figcaption>
       </figure>
       <aside class="sidebar">
-        <section class="note"><h2>ONNX 的两个输入</h2><dl class="ledger">
-          <dt><code>obs</code></dt><dd><code>[1, 93H + 640]</code>。最近 <code>H</code> 帧观测按传感器分组输入，图内再按帧排列。Actor 结合目标输出关节指令 <code>actions [1, 29]</code>。</dd>
-          <dt><code>time_step</code></dt><dd><code>[1, 1]</code>。按帧号读取关节角度和角速度，以及各部位的位置、朝向四元数、线速度和角速度。</dd>
+        <section class="note"><h2>ONNX 的输入与输出</h2><dl class="ledger">
+          <dt><code>obs</code></dt><dd><code>[1, 93H + 640]</code>。最近 <code>H</code> 帧观测按项分组，末尾拼接 10 帧目标。</dd>
+          <dt><code>actions</code></dt><dd><code>[1, 29]</code>。部署端按元数据缩放和偏置，得到关节目标。</dd>
         </dl></section>
-        <details class="note extra-note" open><summary><h2>哪段动作能导出？</h2></summary><p>导出时读取检查点指定的动作文件，最多支持 <strong>15000</strong> 帧。40 段合并后共 441120 帧，超过上限。查询时，负帧号取首帧，超过末尾取末帧。</p></details>
-        <details class="note tint extra-note" open><summary><h2>导出后怎样核对结果？</h2></summary><p><code>--verify</code> 在 CPU 上比较 ONNX 和 PyTorch 的关节指令，最大绝对误差须小于 10⁻⁴。还会检查六组参考数据是否与动作库逐项相等。能否跑完全程，要在仿真里检验。</p></details>
+        <details class="note extra-note" open><summary><h2>怎么换参考动作？</h2></summary><p>推理时选择一段外置 NPZ，按当前动作帧构造目标。换片段时复用同一个 ONNX。</p></details>
+        <details class="note tint extra-note" open><summary><h2>导出后怎样核对结果？</h2></summary><p><code>--verify</code> 在 CPU 上比较 ONNX 和 PyTorch 的原始动作，最大绝对误差须小于 10⁻⁴。整段跟踪用 ONNX 和外置动作一起做仿真评估。</p></details>
       </aside>
     </div>
     <footer class="sources">
       <strong>对照阅读</strong>
       <a href="../../../src/nanomimic/runtime/viewer.py">虚影回放</a>
       <a href="../../../src/nanomimic/runtime/export.py">ONNX 导出</a>
-      <a href="../../../README.md">回放与导出命令</a>
+      <a href="../../QUICKSTART.md">回放与导出命令</a>
     </footer>
   </main>
   <nav class="page-nav" aria-label="海报导航">
-    <div><a href="index.html">图册目录</a><a href="../06-runtime.png">海报原图 ↗</a></div>
+    <div><a href="index.html">图册目录</a><a href="../../QUICKSTART.md#导出-actor-并评估-onnx">导出命令 ↗</a></div>
     <div><a href="05-return.html" rel="prev">← 上一张</a><a href="07-evaluation.html" rel="next">下一张 · 效果验收 →</a></div>
   </nav>
 </body>

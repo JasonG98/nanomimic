@@ -11,7 +11,7 @@ from typing import Any, Literal
 
 from nanomimic.models.model import DynamicsConfig
 from nanomimic.models.policy import ActorConfig, CriticConfig
-from nanomimic.runtime.paths import resolve_checkpoint
+from nanomimic.runtime.paths import run_directory
 
 
 @dataclass(frozen=True)
@@ -90,7 +90,7 @@ class TrainConfig:
     save_interval: int = 1000
     #: 输出根目录；时间戳运行内含指标、曲线及 checkpoints、evaluations、exports 子目录。
     output: Path = Path("runs/nanomimic")
-    #: 从包含四个检查点文件的目录恢复。
+    #: 从 <运行目录>/checkpoints/<迭代号> 恢复。
     resume: Path | None = None
     #: 可选 W&B 项目，仅发送标量；默认不连接。
     wandb_project: str | None = None
@@ -131,7 +131,7 @@ def config_dict(cfg: TrainConfig) -> dict[str, Any]:
 
 
 def load_config(directory: Path) -> TrainConfig:
-    directory = resolve_checkpoint(directory)
+    run_directory(directory)
     data = json.loads((directory / "config.json").read_text(encoding="utf-8"))
     if data.pop("schema_version", None) != 1:
         raise ValueError("不支持的检查点 schema_version")
@@ -159,5 +159,5 @@ def resolve_config(cfg: TrainConfig) -> TrainConfig:
         cfg,
         motion_file=cfg.motion_file.resolve(),
         output=cfg.output.resolve(),
-        resume=None if cfg.resume is None else resolve_checkpoint(cfg.resume).resolve(),
+        resume=None if cfg.resume is None else cfg.resume.resolve(),
     )

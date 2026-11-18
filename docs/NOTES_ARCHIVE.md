@@ -149,7 +149,7 @@ fit/improve、排程余额 0；WM/Actor/Critic 的 Adam 更新计数为 100/10/2
 
 1165 个整卡样本覆盖启动前至退出后，前后基线 618 / 689 MiB，已核实无其他训练任务。
 北京时间 22:36:41–22:39:40，耗时 178.42 秒含初始化、编译、训练与保存，使用已有缓存，
-不代表冷启动或稳定吞吐。检查点现位于 `runs/t6-gpu/checkpoints/00000050/`，日志与核验在
+不代表冷启动或稳定吞吐。检查点位于 `runs/t6-gpu/20261116_223641/checkpoints/00000050/`，日志与核验在
 `runs/t6-gpu-observation/`，显存原始数据为 `runs/t6-gpu-vram-mib.csv`。
 本项验收稳定性与当时规模的资源，不代表收敛效果。
 
@@ -172,14 +172,14 @@ fit/improve、排程余额 0；WM/Actor/Critic 的 Adam 更新计数为 100/10/2
 
 ## T7：真实动作训练与评估（2026-11-16）
 
-- 动作为 `lafan_run1_subject5`，11890 帧、50 Hz、237.8 秒、29 关节、完整 30 body；
+- 动作为 `run1_subject5`，11890 帧、50 Hz、237.8 秒、29 关节、完整 30 body；
   SHA-256：`5e414d9800a0ffce26bd9667dda65ac6c711f287df77c4a5d105c32a9e1d7619`。
-  迁移后原文件保存在 `data/processed/lafan1-g1-v1/legacy/lafan_run1_subject5.npz`。
+  本次训练使用的文件位于 `data/processed/lafan1-g1-v1/clips/run1_subject5-t7.npz`。
 - 真实动作 GPU 预检 2048 环境 × 100 步通过，重置 7314 次。北京时间 23:14:55、
   代码 `17884a9` 从头启动，未恢复 T6；当时为 2048 环境、上限 1000000，其余默认，
   每 1000 次保存。只读参考的上限同为 1000000、环境默认 4096
   （`runners/supermimic_runner.py:72`、`scripts/train.py:28`），不代表实际收敛次数。
-- 检查点与评估现位于 `runs/t7-lafan/{checkpoints,evaluations}/`；启动命令、动作哈希、
+- 检查点与评估位于 `runs/t7-lafan/20261116_231455/{checkpoints,evaluations}/`；启动命令、动作哈希、
   进程信息、日志和显存采样在 `runs/t7-lafan-observation/`。
   当时另有每 5000 次及最终检查点评估的监测进程，信息见 `evaluation-watcher.json`、`status.json`。
 
@@ -210,7 +210,7 @@ fit/improve、排程余额 0；WM/Actor/Critic 的 Adam 更新计数为 100/10/2
 1000/2000 次均为任务终止、无提前超时，存活范围为 2.16–30.28 / 2.04–104.62 秒。
 5000 次仅成功尝试的 body 位置误差为 0.0408078 m，仍有 11 次失败，未达到参考水平验收。
 表中误差覆盖各自存活区间，不能只比较低误差而忽略完成比例与锚点漂移。
-原始 JSON 为 `runs/t7-lafan/evaluations/eval-00001000-seed0.json` 等。
+评估 JSON 为 `runs/t7-lafan/20261116_231455/evaluations/eval-00001000-seed0.json` 等。
 
 第 1000 次检查点已核验 200 轮更新、余额 0、74 个模型张量有限。
 截至当日 23:31:52 的 5078 个整卡样本峰值 **5535 MiB = 5.80386816 GB**（含桌面与评估），
@@ -226,7 +226,7 @@ GPU 利用率均值 86.9444%、中位数 96%；不能据剩余显存直接推断
   逐段约 755 MB；合并 **441120 帧、40 个片段、约 754 MB**，通过形状、有限性、
   单位四元数与帧率校验。顺序为 `LAFAN1_CLIPS` 字典序，端点按帧数累加。
 - 多片段 CPU 2 环境、3 次迭代通过，采样可进入任意片段，目标窗口不跨片段。
-  合并数据超过 ONNX 15000 帧上限，导出须使用单段或裁剪；新目录见下一节。
+  当时的内嵌动作图要求单段或裁剪，合并数据超过 15000 帧上限。[现行导出规格](SPEC.md#48-runtimeexportpy)
 - 转换的局部兼容：`fallAndGetUp2_subject2` 的 body 角速度自检 fp32 最大差
   **1.2815e-5**，CPU/CUDA 均复现。只在转换调用内包装第三方 `assert_close`：
   先用原参数断言，仅失败且绝对差 **<1e-3** 才放过并打印差异，结束立即恢复；
@@ -237,7 +237,7 @@ GPU 利用率均值 86.9444%、中位数 96%；不能据剩余显存直接推断
   **100000×4096 的训练量约为旧 1000000×2048 的 20%**（原记录 2% 为算术笔误）。
   上限不代表收敛，T1 仿真吞吐增幅也不代表完整训练提速。
 
-## 运行产物、帮助与迁移（2026-11-17–18）
+## 运行产物与中文帮助（2026-11-17–18）
 
 ### 日志与目录
 
@@ -258,23 +258,9 @@ GPU 利用率均值 86.9444%、中位数 96%；不能据剩余显存直接推断
 | 检查点 | 运行目录的 `checkpoints/迭代号/`，四文件契约；`checkpoints/index.json` 指向 latest |
 | 默认评估 / ONNX | 运行目录的 `evaluations/` / `exports/actor-迭代号.onnx`；显式输出参数优先 |
 
-### 已执行迁移（2026-11-18 00:28:36，北京时间）
-
-- `tools/migrate_layout.py` 默认只展示计划，`--apply` 执行；预检全部冲突、拒绝覆盖，
-  先存计划、rename 后逐文件核对设备号/inode/大小，不重写数值或历史配置。
-- 完成 **343 项移动、1132 个文件**：40 CSV、40 逐段 NPZ、合并与早期单段 NPZ、
-  250 份四文件检查点、50 份评估 JSON。**82/82 数据文件 SHA-256 一致**，
-  迁移后仍有 250 份检查点，再次计划为 0 项。记录：`data/migrations/20261118_002836_533345.json`。
-- 旧 `data/lafan`、`data/lafan1_all.npz`、`data/lafan_run1_subject5.npz` 保留相对软链接；
-  早期单段置于 `legacy/`，不以后来同名转换数据替换，确保旧检查点使用原内容。
-  `runs/t6-gpu/`、`runs/t7-lafan/` 保留名称，内部迁移；`runs/g1/` 的四份平铺检查点
-  收进 `legacy/`，保留 `20261118_001006/` 指标。历史根配置原样复制最新检查点配置，
-  历史 `run.json` 仅记迁移时间，不推测启动时间或补造配置。
-- `runtime/paths.py` 统一定位与 JSON 原子写入，旧平铺检查点参数仍兼容。
-  `runs/t7-lafan/00245000` 已实测解析并 CPU 加载 245000 次 Actor，旧动作路径指向原文件；
-  `make_motion.py --list` 显示 40 段 CSV/NPZ 就绪。CPU 训练/续训、评估、ONNX 默认目录均验过。
-- 本阶段只整理目录，保留全部检查点；保留策略、最佳检查点、完整数据 manifest、
-  环境指纹与逐段评估留待后续，不在此次扩大范围。
+- 2026-11-18 核对了 **82 个动作数据文件**的 SHA-256、**250 份四文件检查点**与 **50 份评估 JSON**。
+  `make_motion.py --list` 显示 40 段 CSV/NPZ 就绪，CPU 训练、续训、评估与 ONNX 默认目录已验证。
+  检查点保留策略、最佳检查点、完整数据 manifest、环境指纹与逐段评估留待后续。
 
 ### CLI 中文帮助
 
@@ -289,6 +275,7 @@ GPU 利用率均值 86.9444%、中位数 96%；不能据剩余显存直接推断
 ## T8 / T9：导出与回放（2026-11-16–17）
 
 2026-11-16 用户授权 T6 CPU 后先推进 T8/T9，不等待 GPU，已写入 SPEC；原验收标准保留。
+以下记录中的 ONNX 接口为当时的内嵌动作图。[现行导出规格](SPEC.md#48-runtimeexportpy)
 
 - ONNX 输入 `obs: fp32[1,H×93+640]`、`time_step: fp32[1,1]`；图内将 term 主序历史
   转帧主序，输出沿用部署名 `actions` 加六个动作张量。固定 batch=1、opset=18、
@@ -370,56 +357,16 @@ nvidia-smi --id=0 --query-gpu=memory.used --format=csv,noheader,nounits \
 uv run nanomimic train --motion-file data/cache/lafan1-g1-v1/all.npz \
   --device cuda:0 --num-envs 4096 --output runs/g1 --max-iterations 1001
 uv run python tools/evaluate_tracking.py \
-  --checkpoint runs/t7-lafan/checkpoints/00245000 --num-envs 64 --device cuda:0 --seed 0
+  --checkpoint runs/t7-lafan/20261116_231455/checkpoints/00245000 --num-envs 64 --device cuda:0 --seed 0
 ```
 
-T7 收敛与参考比较后，须用其合格检查点做最终 sim2sim。下面首行替换为合格检查点；
-ONNX 在 CPU 推理、物理在 GPU，从各片段首帧连续推进，保留摔倒终止，仅延长超时。
-该脚本尚未执行，CPU 自检与试跑回放不能替代它。
+T7 收敛与参考比较后，用其合格检查点做最终 sim2sim。下面的命令采用现行纯 Actor 接口，
+ONNX 在 CPU 推理、物理在 GPU，从外置动作的首帧连续推进并保留摔倒终止。
 
 ```bash
-export NANOMIMIC_CHECKPOINT=runs/t7-lafan/checkpoints/00245000
+export NANOMIMIC_CHECKPOINT=runs/t7-lafan/20261116_231455/checkpoints/00245000
 uv run nanomimic export --checkpoint "$NANOMIMIC_CHECKPOINT" --out /tmp/nanomimic-t8.onnx --verify
-uv run python - <<'PY'
-import os
-from pathlib import Path
-import numpy as np
-import onnxruntime as ort
-import torch
-from nanomimic.common.specs import SimConfig
-from nanomimic.rollout.imagine import actor_goal
-from nanomimic.rollout.sensor import HistoryRing, add_noise
-from nanomimic.runtime.export import deployment_obs
-from nanomimic.runtime.sim import Sim
-from nanomimic.training.config import load_config
-
-cfg = load_config(Path(os.environ["NANOMIMIC_CHECKPOINT"]))
-assert cfg.motion_file is not None
-session = ort.InferenceSession("/tmp/nanomimic-t8.onnx", providers=["CPUExecutionProvider"])
-with Sim(SimConfig(cfg.motion_file, num_envs=1, device="cuda:0", seed=cfg.seed)) as sim:
-    env = sim._env
-    env.cfg.episode_length_s = (sim.motion.num_frames + 1) * sim.robot.dt
-    start = 0
-    for clip, end in enumerate(sim.motion.clip_ends.tolist()):
-        sim.reset()
-        sim._command.reset_to_frame(torch.tensor([0], device=sim.device), start)
-        env.scene.write_data_to_sim()
-        env.sim.forward()
-        env.sim.sense()
-        sim._command.update_relative_body_poses()
-        obs = sim._snapshot(env.observation_manager.compute(update_history=True))
-        history = HistoryRing(cfg.actor.history_length)
-        history.push(add_noise(obs.sensor))
-        for frame in range(start, end + 1):
-            assert sim.motion_time.item() == frame, "动作时间未连续推进"
-            packed = deployment_obs(history.window(), actor_goal(obs.goal)).cpu().numpy()
-            action = session.run(["actions"], {
-                "obs": packed, "time_step": np.array([[frame]], dtype=np.float32),
-            })[0]
-            obs, _, terminated, truncated = sim.step(torch.as_tensor(action, device=sim.device))
-            assert not (terminated | truncated).any(), f"第 {clip} 段第 {frame} 帧失败"
-            history.push(add_noise(obs.sensor))
-        print(f"第 {clip} 段完整跟踪通过，共 {end - start + 1} 帧")
-        start = end + 1
-PY
+uv run python tools/evaluate_tracking.py --onnx /tmp/nanomimic-t8.onnx \
+  --motion-file data/processed/lafan1-g1-v1/clips/run1_subject5-t7.npz \
+  --device cuda:0 --num-envs 1 --seed 0
 ```

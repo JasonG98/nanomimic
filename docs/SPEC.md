@@ -45,14 +45,15 @@ nanomimic/
 │  │  ├─ config.py        训练配置、JSON 与恢复配置
 │  │  └─ checkpoints.py   检查点保存与恢复
 │  ├─ runtime/
-│  │  ├─ paths.py         产物目录、旧检查点路径兼容与 JSON 原子写入
+│  │  ├─ paths.py         检查点目录约定与 JSON 原子写入
 │  │  ├─ sim.py           mjlab 适配
 │  │  ├─ motion.py        本地 NPZ 动作文件校验
-│  │  ├─ export.py        ONNX 导出与 CPU 一致性自检
+│  │  ├─ export.py        纯 Actor ONNX 导出与 CPU 一致性自检
+│  │  ├─ inference.py     部署观测打包与 ONNX CPU 推理
 │  │  └─ viewer.py        回放与世界模型闭环虚影
 │  └─ cli.py              train / play / export
 ├─ tests/          CPU 可跑的单测；tests/fixtures/ 存对拍夹具
-├─ tools/          生成夹具、转换动作、评估、绘图与迁移旧目录
+├─ tools/          生成夹具、转换动作、闭环评估与绘图
 ├─ data/           本地原始动作、逐段处理结果与合并缓存（不入 Git）
 ├─ runs/           时间戳运行、检查点、指标、评估与导出（不入 Git）
 ├─ docs/
@@ -95,7 +96,7 @@ J 为关节数（G1 是 29），动作维度 A = J，E 为并行环境数。
 - Obs 含 full_state、goal、sensor（干净的 proprio）。
 - robot（RobotSpec）：关节名、默认关节位置、软限位、动作缩放与偏置、控制步长 dt、body 名、锚点 body、FK 所需的父子关系、关节轴与固定旋转，以及软终止的两个阈值（取自任务配置里 anchor_pos 与 anchor_ori 终止项）。
 - motion（Motion）：预计算的参考张量 body_pos_w、body_quat_w、body_lin_vel_w、body_ang_vel_w（[T, B, ·]）、joint_pos、joint_vel（[T, J]）、各 clip 末帧索引、总帧数。动作文件用本地 npz 路径加载。
-- 本地 LAFAN1 目录：原始 CSV 为 `data/raw/lafan1/g1/`，逐段 NPZ 为 `data/processed/lafan1-g1-v1/clips/`，合并缓存为 `data/cache/lafan1-g1-v1/all.npz`；转换工具支持显式覆盖三类路径。目录整理不修改 NPZ 数值契约。
+- 本地 LAFAN1 的原始 CSV 位于 `data/raw/lafan1/g1/`，逐段 NPZ 位于 `data/processed/lafan1-g1-v1/clips/`，合并缓存位于 `data/cache/lafan1-g1-v1/all.npz`。转换工具支持显式指定三类路径。
 - ctx_spec：三个随机化通道及取值范围；read_ctx() 返回归一化到 [-1, 1] 的 [E, C]。
 
 ### 4.2 models/model.py
@@ -154,16 +155,15 @@ J 为关节数（G1 是 29），动作维度 A = J，E 为并行环境数。
 - 编译：对 rollout 与损失函数用 torch.compile；不要手写 CUDA graph。
 - 检查点：每 1000 次迭代保存 world_model.pt、actor.pt、critic.pt（含归一化状态）与 config.json（带 schema_version），支持 --resume；日志每 100 次迭代打印，W&B 是可选的 Sink（只记标量）。
 - 输出：每次启动在 `--output` 根目录下创建北京时间 `YYYYMMDD_HHMMSS` 子目录，同秒重名时加序号。启动时打印实际目录，每轮原始指标写入 `metrics.jsonl`；曲线 `training-curves.png` / `training-curves.svg` 与检查点同周期更新，正常结束也补存检查点与曲线。检查点配置保留输出根目录，续训在该根目录下创建新运行目录，指标只记录本次续训的迭代，不拼接历史数据。
-- 运行内布局：根目录在进入训练循环前保存 `config.json` 与 `run.json`（schema_version、创建时间、续训来源）；检查点位于 `checkpoints/迭代号/`，完整保存后更新 `checkpoints/index.json` 的 latest 字段；默认评估产物位于 `evaluations/`，默认 ONNX 位于 `exports/actor-迭代号.onnx`，显式输出参数优先。`runtime/paths.py` 统一目录定位与 JSON 原子写入，旧的平铺检查点参数继续兼容。本阶段保留全部检查点。
-- 旧目录由 `tools/migrate_layout.py` 迁移，默认只展示计划，`--apply` 才执行。移动前检查全部目标冲突，移动后逐文件核对身份与大小；不改写历史配置、评估或权重。旧动作路径保留相对软链接；旧运行名称保留，混有时间戳运行的根目录将平铺产物收进 legacy/。执行前计划与完成记录位于 `data/migrations/`。
+- 运行目录在进入训练循环前保存 `config.json` 与 `run.json`（schema_version、创建时间、续训来源）。检查点入口统一接收 `<运行目录>/checkpoints/<迭代号>`，完整保存后更新 `checkpoints/index.json` 的 `latest`。默认评估产物位于 `evaluations/`，默认 ONNX 位于 `exports/actor-迭代号.onnx`，显式输出参数优先。`runtime/paths.py` 统一校验检查点路径和原子写入 JSON。本阶段保留全部检查点。
 
 ### 4.8 runtime/export.py
 
-- 导出 motion 契约的 ONNX，沿用 mjlab 跟踪任务的部署契约：输入 (obs, time_step)，输出 (action, joint_pos, joint_vel, body_pos_w, body_quat_w, body_lin_vel_w, body_ang_vel_w)。
-- 动作库张量作为常量 buffer 嵌进图里，time_step 钳在末帧；obs 先在图内从 term 主序转成帧主序再喂 Actor。obs 布局与元数据以参考仓库 runners/exporter.py 的 motion 部分为准，差异记入 docs/NOTES.md。
-- 元数据：mjlab 的 get_base_metadata 与 attach_metadata_to_onnx，另加 anchor_body_name、body_names、observation_names、observation_history_lengths。
-- 仅当动作库不超过 15000 帧时导出。export --verify 执行 CPU 数值一致性自检；
-  第 6 节的完整动作闭环且不摔倒的 sim2sim，待 T7 得到合格策略后单独验收。
+- 单文件 ONNX 固定批量为 1、fp32、opset 18。输入 `obs[1, H×93+640]`，输出原始 `actions[1, 29]`。图内将按观测项排列的历史转成帧主序，再与参考目标一并交给带归一化的 Actor。
+- 导出只读取检查点配置和 Actor 权重。参考动作使用外置 NPZ，由调用方按 50 Hz 推进并在当前片段内取第 3 节的目标窗口。换片段时可复用同一个模型。
+- 元数据以字符串保存。包含 `run_path`、`anchor_body_name`，以及用 JSON 编码的 `iteration`、`history_length`、`control_dt`、`joint_names`、`motion_body_names`、`default_joint_pos`、`action_scale`、`action_offset`、`joint_stiffness`、`joint_damping`。其中 `motion_body_names` 是 NPZ 的完整 body 列顺序。
+- 调用方将原始 `actions` 按 `action_offset + action_scale × actions` 转成关节目标，原始输出用于下一步的历史。部署侧的目标和观测布局见[复现指南](QUICKSTART.md#部署观测与动作)。
+- `export --verify` 在 CPU 比较 PyTorch 与 ONNX 的原始动作。仿真闭环使用 `tools/evaluate_tracking.py --onnx <模型> --motion-file <单段 NPZ>`，ONNX 在 CPU 推理，仿真设备由 `--device` 指定。
 
 ### 4.9 runtime/viewer.py
 
@@ -180,11 +180,7 @@ play 可用 --device 指定设备、--num-steps 指定有限回放步数；默�
 
 ## 5. 开发任务
 
-当前状态：T0–T6 已通过验收（含 T1 与 T6 的 RTX 5060 Ti GPU 实测）；T8 的实现与
-CPU 数值验收、T9 的实现与 Mac CPU 实测已完成。T7 已开始真实动作收敛训练，
-效果验证和参考阈值确认尚未完成；T8 最终完整动作闭环且不摔倒的 sim2sim
-须使用 T7 得到的合格策略。CPU 试跑检查点仅验证导出和回放功能，不代替训练效果验收。
-各任务的验收进展见[实测归档](NOTES_ARCHIVE.md#当前状态与待办)。
+T0–T6 已通过验收，含 T1 与 T6 的 RTX 5060 Ti 实测。T8 纯 Actor 通过了 CPU 数值自检与外置动作的整段 CPU 仿真，T9 已通过 Mac CPU 回放实测。T7 的参考阈值确认和效果验收，以及使用 T7 合格策略的 RTX 5060 Ti 仿真闭环待完成。[近期实测](NOTES.md#纯-actor-与外置动作) · [实测归档](NOTES_ARCHIVE.md#当前状态与待办)
 
 | 任务 | 内容 | 验收 |
 |---|---|---|
@@ -202,7 +198,7 @@ CPU 数值验收、T9 的实现与 Mac CPU 实测已完成。T7 已开始真实�
 ## 6. 验收
 
 1. 单元：T3 与 T5 的对拍夹具全部通过。
-2. 效果：同一段动作（lafan_run1_subject5）训练到收敛，在仿真中完整跟踪、不摔倒的成功率和平均跟踪误差达到参考实现的水平；不要求训练曲线一致。阈值与参考实现对比后写入 docs/NOTES.md，由用户确认。
+2. 效果：同一段动作（`run1_subject5`）训练到收敛，在仿真中完整跟踪、不摔倒的成功率和平均跟踪误差达到参考实现的水平；不要求训练曲线一致。阈值与参考实现对比后写入 docs/NOTES.md，由用户确认。
 3. 导出：onnxruntime 与 PyTorch Actor 的动作差小于 1e-4；用 ONNX 在仿真里闭环跑完整段动作且不摔倒（sim2sim）。
 4. 资源：默认配置下显存峰值低于 15GB。
 5. 规范：ruff 与 pyright 无报错；单文件不超过约 300 行；导入规则测试通过。
@@ -227,5 +223,5 @@ CPU 数值验收、T9 的实现与 Mac CPU 实测已完成。T7 已开始真实�
 1. 16GB 的显存数字是估算，以 T1 与 T6 的实测为准，必要时降低 batch 或环境数。
 2. mjlab 的 adaptive 采样名称与发布版 API 在 T2 核对；缺失时在 `runtime/sim.py` 内用子类补，不要依赖私有 fork。
 3. 原实现的域随机化只有三项，没有动作延迟与外力扰动；首次上真机前必须先通过 sim2sim 自检，再用吊装与低增益逐步放开。
-4. 真机运行时（读取 ONNX、对接机器人 SDK、安全限幅）不在本项目内；ONNX 沿用 mjlab 跟踪任务的部署契约。
+4. 真机运行时由下游工程负责，包括机器人 SDK、硬件控制与安全限幅。本项目在仿真中验证纯 Actor ONNX 与外置参考动作。
 5. 这是独立重写，不是严格意义的 clean-room；沿用 Apache-2.0，并保留对 SuperMimic 的致谢。

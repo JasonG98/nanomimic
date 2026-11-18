@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import fields
 from pathlib import Path
 from typing import cast
@@ -15,7 +16,7 @@ from mjlab.envs import ManagerBasedRlEnv, ManagerBasedRlEnvCfg, mdp
 from mjlab.envs.mdp.actions import JointPositionAction
 from mjlab.managers import ObservationGroupCfg, ObservationTermCfg
 from mjlab.rl import RslRlBaseRunnerCfg
-from mjlab.rl.exporter_utils import attach_metadata_to_onnx, get_base_metadata
+from mjlab.rl.exporter_utils import get_base_metadata
 from mjlab.tasks.registry import list_tasks, register_mjlab_task
 from mjlab.tasks.tracking.config.g1.env_cfgs import unitree_g1_flat_tracking_env_cfg
 from mjlab.tasks.tracking.mdp.commands import MotionCommand, MotionCommandCfg
@@ -130,6 +131,53 @@ def _env_cfg() -> ManagerBasedRlEnvCfg:
     return cfg
 
 
+def _action_affine(env: ManagerBasedRlEnv) -> tuple[Tensor, Tensor]:
+    robot = env.scene["robot"]
+    action = cast(JointPositionAction, env.action_manager.get_term("joint_pos"))
+    if action.target_names != list(robot.joint_names):
+        raise ValueError("动作顺序必须与机器人关节顺序一致")
+
+    def affine(value: Tensor | float) -> Tensor:
+        tensor = torch.as_tensor(value, device=env.device, dtype=torch.float32)
+        return torch.broadcast_to(tensor, (env.num_envs, robot.num_joints))[0].clone()
+
+    return affine(action.scale), affine(action.offset)
+
+
+def deployment_metadata() -> tuple[int, dict[str, str]]:
+    """从无动作指令的 CPU 场景解析关节顺序、姿态和动作参数。"""
+    cfg = _env_cfg()
+    command = cast(MotionCommandCfg, cfg.commands["motion"])
+    cfg.scene.num_envs = 1
+    env = ManagerBasedRlEnv(
+        ManagerBasedRlEnvCfg(
+            decimation=cfg.decimation,
+            scene=cfg.scene,
+            sim=cfg.sim,
+            actions=cfg.actions,
+            observations={"actor": cfg.observations["actor"]},
+            events={},
+        ),
+        device="cpu",
+    )
+    try:
+        robot = env.scene["robot"]
+        scale, offset = _action_affine(env)
+        base = get_base_metadata(env, "")
+        fields = {key: base[key] for key in ("joint_names", "joint_stiffness", "joint_damping", "default_joint_pos")}
+        fields.update(
+            action_scale=scale.tolist(),
+            action_offset=offset.tolist(),
+            control_dt=env.step_dt,
+            motion_body_names=list(robot.body_names),
+        )
+        metadata = {key: json.dumps(value, allow_nan=False) for key, value in fields.items()}
+        metadata["anchor_body_name"] = command.anchor_body_name
+        return robot.num_joints, metadata
+    finally:
+        env.close()
+
+
 def _robot_spec(env: ManagerBasedRlEnv) -> RobotSpec:
     robot = env.scene["robot"]
     model = env.sim.mj_model
@@ -138,22 +186,17 @@ def _robot_spec(env: ManagerBasedRlEnv) -> RobotSpec:
     parent_map = {body: row for row, body in enumerate(body_ids)}
     joint_map = {int(model.jnt_bodyid[joint]): col for col, joint in enumerate(joint_ids)}
     command = cast(MotionCommand, env.command_manager.get_term("motion"))
-    action = cast(JointPositionAction, env.action_manager.get_term("joint_pos"))
-    if action.target_names != list(robot.joint_names):
-        raise ValueError("动作顺序必须与机器人关节顺序一致")
+    scale, offset = _action_affine(env)
 
     def tensor(value: object) -> Tensor:
         return torch.as_tensor(value, device=env.device, dtype=torch.float32).clone()
-
-    def affine(value: Tensor | float) -> Tensor:
-        return torch.broadcast_to(tensor(value), (env.num_envs, robot.num_joints))[0].clone()
 
     return RobotSpec(
         joint_names=tuple(robot.joint_names),
         default_joint_pos=robot.data.default_joint_pos[0].clone(),
         soft_joint_pos_limits=robot.data.soft_joint_pos_limits[0].clone(),
-        action_scale=affine(action.scale),
-        action_offset=affine(action.offset),
+        action_scale=scale,
+        action_offset=offset,
         dt=env.step_dt,
         body_names=tuple(command.cfg.body_names),
         anchor_body_name=command.cfg.anchor_body_name,
@@ -264,25 +307,6 @@ class Sim:
             raise ValueError("action 必须全部为有限值")
         obs, reward, terminated, truncated, _ = self._env.step(action)
         return self._snapshot(obs), reward.clone(), terminated.clone(), truncated.clone()
-
-    def attach_export_metadata(self, path: Path, history_length: int, run_name: str) -> None:
-        """在 mjlab 边界附加部署元数据；目标不堆叠历史且不含相对位置。"""
-        metadata = get_base_metadata(self._env, run_name)
-        names = list(self._env.observation_manager.active_terms["actor"])
-        metadata.update(
-            anchor_body_name=self.robot.anchor_body_name,
-            body_names=list(self.robot.body_names),
-            observation_names=[*names, "command", "motion_anchor_ori_b"],
-            observation_history_lengths=[history_length] * len(names) + [1, 1],
-            observation_terms_history_length=[history_length] * len(names) + [1, 1],
-        )
-        for key, extra in (
-            ("observation_terms_scale", [1.0, 1.0]),
-            ("observation_terms_flatten_history_dim", [True, True]),
-            ("observation_terms_clip", [[float("-inf"), float("inf")]] * 2),
-        ):
-            metadata[key] = cast(list, metadata[key]) + extra
-        attach_metadata_to_onnx(str(path), metadata)
 
     def close(self) -> None:
         self._env.close()
