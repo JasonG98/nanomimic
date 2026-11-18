@@ -16,4 +16,4 @@
 
 上表的 PNG 可在 GitHub 直接浏览。把仓库保存在本地后，用浏览器打开 HTML 目录页即可离线翻页。观测页可拖动当前帧，回报页可调节误差，源码地图里的模块名可点击。浏览器打印将当前图解排为一张横向 A4。[HTML 目录页](html/index.html)
 
-封面取自 `dance1_subject1` 按 50 Hz 采样后的第 3000、3040、3080 帧，帧号从 0 开始。每个姿势都按该帧记录的位置和朝向绘制，使用 mjlab 自带的 Unitree G1 模型。三帧的视角、比例相同。效果页的评估数据来自跑步片段 `lafan_run1_subject5`。[动作转换工具](../../tools/make_motion.py) · [实测记录](../NOTES.md)
+封面取自 `dance1_subject1` 按 50 Hz 采样后的第 3000、3040、3080 帧，帧号从 0 开始。每个姿势都按该帧记录的位置和朝向绘制，使用 mjlab 自带的 Unitree G1 模型。三帧的视角、比例相同。效果页的评估数据来自跑步片段 `lafan_run1_subject5`。[动作转换工具](../../tools/make_motion.py) · [实测记录](../NOTES_ARCHIVE.md#已记录的阶段结果)

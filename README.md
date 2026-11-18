@@ -4,7 +4,7 @@
 
 - [图解 Wiki](docs/wiki/README.md) · 从一段 G1 动作看懂训练闭环、代码架构和效果评估。
 - 开发规格：[docs/SPEC.md](docs/SPEC.md)
-- 实测与决策记录：[docs/NOTES.md](docs/NOTES.md)
+- [近期决策](docs/NOTES.md) · [历史决策与实测归档](docs/NOTES_ARCHIVE.md)
 - 开发工作方式：[AGENTS.md](AGENTS.md)
 
 ## 代码结构
@@ -26,8 +26,7 @@ src/nanomimic/
 
 使用 Python 3.13 与 uv；GPU 训练面向 Linux、NVIDIA RTX 5060 Ti 16GB。
 `uv sync` 在 Linux 安装 PyTorch CUDA 13.2 构建，在 Mac 安装 CPU/MPS 构建。
-T1 与 T6 GPU 验收已通过，T7 正在用真实动作训练；收敛效果和 T8 最终 sim2sim
-尚未通过验收，详情见 NOTES。
+T1 与 T6 已通过 GPU 验收。T7 已开始用真实动作训练，收敛效果和 T8 最终 sim2sim 仍待验收。[验收记录与待办](docs/NOTES_ARCHIVE.md#当前状态与待办)
 
 ```bash
 uv sync
@@ -127,7 +126,7 @@ JSON 同时记录完整动作成功率、平均存活时间、完成比例、尝
 `error_body_rot` 是旋转误差角均值（rad），关节误差为整个关节向量的 L2 范数。
 尝试期间误差按实际控制步加权，包含失败的最后一步；低误差本身不能证明完整跟踪成功。
 比较检查点应保持动作 SHA-256、种子、尝试数和评估协议一致。当前缺少同段动作的
-SuperMimic 参考结果，效果阈值须在获得可比结果后写入 NOTES，由用户确认。
+SuperMimic 参考结果。取得可比结果后，将待用户确认的效果阈值写入[决策记录](docs/NOTES.md)。
 
 从本轮日志绘制损失、真实奖励、完整动作评估及整卡资源曲线：
 
