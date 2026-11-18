@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>一次训练会经过哪些模块？ · nanomimic 图解</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="assets/wiki.css">
+  <script defer src="assets/controls.js"></script>
+</head>
+<body>
+  <main class="sheet" data-screen-label="源码地图">
+    <header class="mast">
+      <a class="brand" href="index.html" aria-label="nanomimic 图册目录"><span class="mark" aria-hidden="true"><i></i><i></i><i></i></span>nanomimic</a>
+      <div class="mast-end"><span>源码地图</span><span class="folio">02 / 07</span></div>
+    </header>
+    <header class="titleblock">
+      <h1>一次训练会经过<em>哪些模块？</em></h1>
+      <p>顺着 <code>train</code> 找到调度器。它向仿真要数据，再用这些张量拟合世界模型、更新策略。</p>
+    </header>
+    <div class="spread">
+      <figure class="plate">
+        <div class="plate-inner grid-paper">
+          <div class="fig-head"><span>从命令入口到张量计算</span><span class="fig-no">src/nanomimic</span></div>
+          <div class="tree">
+            <a class="entry-node" href="../../../src/nanomimic/cli.py"><strong>cli.py</strong></a>
+            <div class="entry-fork" aria-hidden="true"></div>
+            <div class="branch">
+              <div><span class="branch-label">↓ train</span><div class="branch-node"><strong><a href="../../../src/nanomimic/training/train.py">training/</a></strong><small>采集、拟合与策略改进</small></div></div>
+              <div><span class="branch-label">↓ play · export</span><div class="branch-node"><strong><a href="../../../src/nanomimic/runtime/">runtime/</a></strong><small>仿真适配、文件与回放</small></div></div>
+            </div>
+            <div class="branch" aria-hidden="true"><div>↓</div><div>↓</div></div>
+            <div class="core">
+              <p>共享的张量计算与数据契约</p>
+              <div class="core-chain">
+                <a href="../../../src/nanomimic/rollout/">rollout/<small>采样与想象</small></a><span>→</span>
+                <a href="../../../src/nanomimic/models/">models/<small>动力学与策略</small></a><span>→</span>
+                <a href="../../../src/nanomimic/common/">common/<small>契约与数学</small></a>
+              </div>
+            </div>
+          </div>
+        </div>
+        <figcaption class="fig-caption"><code>training/</code> 也通过 <code>runtime/sim.py</code> 采集物理数据。包内直接导入 mjlab 的入口只有 <code>sim.py</code> 和 <code>viewer.py</code>。</figcaption>
+      </figure>
+      <aside class="sidebar">
+        <section class="note"><h2>想改跟踪评分</h2><p>从 <a href="../../../src/nanomimic/rollout/imagine.py"><code>rollout/imagine.py</code></a> 进入。目标窗口、奖励与软终止都在这里，可以对照 CPU 数值夹具。</p></section>
+        <details class="note extra-note" open><summary><h2>想看网络怎样更新</h2></summary><p><a href="../../../src/nanomimic/training/train.py"><code>train.py</code></a> 决定何时更新，<a href="../../../src/nanomimic/training/learning.py"><code>learning.py</code></a> 实际拟合动力学、改进策略。网络本身定义在 <code>models/</code>。</p></details>
+        <details class="note extra-note" open><summary><h2>想找一次训练的结果</h2></summary><p>进入终端打印的时间戳目录。逐轮指标在 <code>metrics.jsonl</code>，检查点索引在 <code>checkpoints/index.json</code>，默认评估与导出各有子目录。</p></details>
+      </aside>
+    </div>
+    <footer class="sources">
+      <strong>对照阅读</strong>
+      <a href="../../../src/nanomimic/">包目录</a>
+      <a href="../../../tests/test_import_rules.py">导入边界测试</a>
+      <a href="../../SPEC.md">仓库结构</a>
+    </footer>
+  </main>
+  <nav class="page-nav" aria-label="海报导航">
+    <div><a href="index.html">图册目录</a><a href="../02-architecture.png">海报原图 ↗</a></div>
+    <div><a href="01-training.html" rel="prev">← 上一张</a><a href="03-observations.html" rel="next">下一张 · 观测与目标 →</a></div>
+  </nav>
+</body>
+</html>

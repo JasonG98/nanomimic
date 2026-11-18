@@ -2,6 +2,7 @@
 
 用可微世界模型在「想象」中反向传播，训练人形（Unitree G1）全身动作跟踪策略，并导出 ONNX 供真机部署。
 
+- [图解 Wiki](docs/wiki/README.md) · 从一段 G1 动作看懂训练闭环、代码架构和效果评估。
 - 开发规格：[docs/SPEC.md](docs/SPEC.md)
 - 实测与决策记录：[docs/NOTES.md](docs/NOTES.md)
 - 开发工作方式：[AGENTS.md](AGENTS.md)

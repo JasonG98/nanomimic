@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>训练结束后，哪些部分还在工作？ · nanomimic 图解</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="assets/wiki.css">
+  <script defer src="assets/controls.js"></script>
+</head>
+<body>
+  <main class="sheet" data-screen-label="回放与导出">
+    <header class="mast">
+      <a class="brand" href="index.html" aria-label="nanomimic 图册目录"><span class="mark" aria-hidden="true"><i></i><i></i><i></i></span>nanomimic</a>
+      <div class="mast-end"><span>回放与导出</span><span class="folio">06 / 07</span></div>
+    </header>
+    <header class="titleblock">
+      <h1>训练结束后，<em>哪些部分还在工作？</em></h1>
+      <p>回放同时运行物理仿真和世界模型，用虚影观察预测怎样偏离。导出则把做决策的 Actor 和一份参考动作库装进 ONNX。</p>
+    </header>
+    <div class="spread">
+      <figure class="plate">
+        <div class="plate-inner grid-paper">
+          <div class="fig-head"><span>回放时的两条闭环</span><span class="fig-no">play · env 0</span></div>
+          <div class="lanes">
+            <div><strong>物理仿真</strong><div class="lane">
+              <span><b>仿真观测</b><small>历史与目标</small></span><span class="arrow">→</span>
+              <span><b>Actor</b><small>本侧动作</small></span><span class="arrow">→</span>
+              <span><b>仿真步进</b><small>下一帧观测 ↺</small></span>
+            </div></div>
+            <div><strong>预测虚影</strong><div class="lane pred">
+              <span><b>合成观测</b><small>预测历史与目标</small></span><span class="arrow">→</span>
+              <span><b>Actor</b><small>本侧动作</small></span><span class="arrow">→</span>
+              <span><b>模型步进</b><small>下一帧观测 ↺</small></span>
+            </div></div>
+          </div>
+          <div class="sync-line">回合结束或到达指定周期时重新对齐</div>
+        </div>
+        <figcaption class="fig-caption">两侧共用 Actor 权重，各自取目标、维护带噪历史并计算动作。两条轨迹之间的距离显示预测在闭环中怎样累积偏差。</figcaption>
+      </figure>
+      <aside class="sidebar">
+        <section class="note"><h2>ONNX 的两个入口</h2><dl class="ledger">
+          <dt><code>obs</code></dt><dd>调用方提供 <code>[1, 93H + 640]</code>。图内把按传感器分组的历史转成按帧排列，Actor 输出 <code>actions [1, 29]</code>。</dd>
+          <dt><code>time_step</code></dt><dd>形状 <code>[1, 1]</code>，只查询内嵌动作库。返回关节位置、速度，以及部位的位置、四元数、线速度、角速度。</dd>
+        </dl></section>
+        <details class="note extra-note" open><summary><h2>哪段动作能导出？</h2></summary><p>导出读取检查点配置中的动作文件，总帧数上限 <strong>15000</strong>。查询时间会被限制在有效帧内。40 段合并训练库共 441120 帧，超过上限。</p></details>
+        <details class="note tint extra-note" open><summary><h2>导出自检看什么？</h2></summary><p><code>--verify</code> 在 CPU 上比较动作误差（要求 &lt;10⁻⁴），并逐元素核对六项参考量。完整动作的 ONNX 闭环跟踪另行验收。</p></details>
+      </aside>
+    </div>
+    <footer class="sources">
+      <strong>对照阅读</strong>
+      <a href="../../../src/nanomimic/runtime/viewer.py">虚影回放</a>
+      <a href="../../../src/nanomimic/runtime/export.py">ONNX 导出</a>
+      <a href="../../../README.md">回放与导出命令</a>
+    </footer>
+  </main>
+  <nav class="page-nav" aria-label="海报导航">
+    <div><a href="index.html">图册目录</a><a href="../06-runtime.png">海报原图 ↗</a></div>
+    <div><a href="05-return.html" rel="prev">← 上一张</a><a href="07-evaluation.html" rel="next">下一张 · 效果验收 →</a></div>
+  </nav>
+</body>
+</html>

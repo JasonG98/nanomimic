@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>快要摔倒，未来还值多少分？ · nanomimic 图解</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="assets/wiki.css">
+  <script defer src="assets/controls.js"></script>
+</head>
+<body>
+  <main class="sheet" data-screen-label="想象回报">
+    <header class="mast">
+      <a class="brand" href="index.html" aria-label="nanomimic 图册目录"><span class="mark" aria-hidden="true"><i></i><i></i><i></i></span>nanomimic</a>
+      <div class="mast-end"><span>想象回报</span><span class="folio">05 / 07</span></div>
+    </header>
+    <header class="titleblock">
+      <h1>快要摔倒，<em>未来还值多少分？</em></h1>
+      <p>想象中的一步既要评估动作像不像，也要估计 G1 还能撑多久。越接近失衡，后面那些好动作对当前决策的分量就越轻。</p>
+    </header>
+    <div class="spread">
+      <figure class="plate" id="risk-demo">
+        <div class="plate-inner grid-paper">
+          <div class="fig-head"><span>误差越过阈值时的软终止</span><span class="fig-no">p = sigmoid((e − 1) / 0.05)</span></div>
+          <div class="chart-wrap">
+            <svg class="diagram chart" viewBox="0 0 500 191" role="img" aria-labelledby="risk-title risk-desc">
+              <title id="risk-title">归一化误差与终止概率的关系</title>
+              <desc id="risk-desc">误差从 0.8 增至 1.2 时，终止概率由约百分之二平滑升至约百分之九十八，经过阈值 1 时为百分之五十。</desc>
+              <g fill="none" stroke="#829a83" stroke-width="1"><path d="M57 25H468 M57 88H468 M262.5 25V151" stroke-dasharray="4 5"/></g>
+              <path d="M57 22V151H468" fill="none" stroke="#254b39" stroke-width="1.6"/>
+              <g text-anchor="end"><text x="50" y="30">100%</text><text x="50" y="93">50%</text><text x="50" y="154">0</text></g>
+              <g text-anchor="middle" class="svg-code"><text x="57" y="172">0.8</text><text x="262.5" y="172">1.0</text><text x="468" y="172">1.2</text></g>
+              <text x="58" y="17">终止概率 p</text><text x="263" y="189" text-anchor="middle">归一化误差 e</text>
+              <path d="M57.00 148.73 L63.85 148.42 L70.70 148.06 L77.55 147.65 L84.40 147.19 L91.25 146.66 L98.10 146.07 L104.95 145.39 L111.80 144.63 L118.65 143.78 L125.50 142.81 L132.35 141.73 L139.20 140.52 L146.05 139.17 L152.90 137.66 L159.75 135.98 L166.60 134.13 L173.45 132.08 L180.30 129.83 L187.15 127.38 L194.00 124.72 L200.85 121.83 L207.70 118.74 L214.55 115.44 L221.40 111.94 L228.25 108.26 L235.10 104.41 L241.95 100.43 L248.80 96.35 L255.65 92.19 L262.50 88.00 L269.35 83.81 L276.20 79.65 L283.05 75.57 L289.90 71.59 L296.75 67.74 L303.60 64.06 L310.45 60.56 L317.30 57.26 L324.15 54.17 L331.00 51.28 L337.85 48.62 L344.70 46.17 L351.55 43.92 L358.40 41.87 L365.25 40.02 L372.10 38.34 L378.95 36.83 L385.80 35.48 L392.65 34.27 L399.50 33.19 L406.35 32.22 L413.20 31.37 L420.05 30.61 L426.90 29.93 L433.75 29.34 L440.60 28.81 L447.45 28.35 L454.30 27.94 L461.15 27.58 L468.00 27.27" fill="none" stroke="#285640" stroke-width="4"/>
+              <circle id="risk-point" cx="262.5" cy="88" r="7" fill="#b6482a" stroke="#fff9e9" stroke-width="2"/>
+            </svg>
+          </div>
+          <div class="plot-readout">
+            <span>误差 <output for="risk-input" id="risk-value">1.00</output></span>
+            <span>本步终止 <output for="risk-input" id="risk-prob">50.0%</output></span>
+            <span>继续存活 <output for="risk-input" id="risk-survive">50.0%</output></span>
+          </div>
+          <div class="live-control" hidden><input type="range" id="risk-input" aria-label="用于计算终止概率的归一化误差" min="0.8" max="1.2" step="0.01" value="1"></div>
+        </div>
+        <figcaption class="fig-caption">把骨盆高度误差、倾斜误差各自除以对应阈值，取较大者为 <code>e</code>。阈值处 <code>p = 0.5</code>，下一步仍存活的权重减半。</figcaption>
+      </figure>
+      <aside class="sidebar">
+        <section class="note"><h2>先给姿势打分</h2><p>骨盆位置和朝向在世界坐标系直接比较。比较各部位姿态时，先把参考动作的水平位置和偏航对齐到预测骨盆，保留参考的高度与倾斜。</p></section>
+        <details class="note extra-note" open><summary><h2>再看运动是否顺畅</h2></summary><p>另外比较各部位的线速度、角速度，扣除动作突变与关节越限。六项正奖励的权重合计 5，乘控制步长后每步上限为 0.10。</p></details>
+        <details class="note tint extra-note" open><summary><h2>把 32 步合成一次回报</h2></summary><p>每步奖励乘以时间折扣及此前累积的存活概率。末端再加上同样折扣后的价值估计，Actor 据此更新。价值网络（Critic）读取 68 维状态、640 维目标和 33 维环境信息，以广义优势估计（GAE）构造训练目标。</p></details>
+      </aside>
+    </div>
+    <footer class="sources">
+      <strong>对照阅读</strong>
+      <a href="../../../src/nanomimic/rollout/imagine.py">奖励与软终止</a>
+      <a href="../../../src/nanomimic/training/learning.py">策略损失与 GAE</a>
+      <a href="../../../tests/test_imagine.py">梯度测试</a>
+    </footer>
+  </main>
+  <nav class="page-nav" aria-label="海报导航">
+    <div><a href="index.html">图册目录</a><a href="../05-return.png">海报原图 ↗</a></div>
+    <div><a href="04-world-model.html" rel="prev">← 上一张</a><a href="06-runtime.html" rel="next">下一张 · 回放与导出 →</a></div>
+  </nav>
+</body>
+</html>

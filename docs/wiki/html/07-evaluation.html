@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>跑完整段动作，有多难？ · nanomimic 图解</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="assets/wiki.css">
+  <script defer src="assets/controls.js"></script>
+</head>
+<body>
+  <main class="sheet" data-screen-label="效果验收">
+    <header class="mast">
+      <a class="brand" href="index.html" aria-label="nanomimic 图册目录"><span class="mark" aria-hidden="true"><i></i><i></i><i></i></span>nanomimic</a>
+      <div class="mast-end"><span>效果验收</span><span class="folio">07 / 07</span></div>
+    </header>
+    <header class="titleblock">
+      <h1>跑完整段动作，<em>有多难？</em></h1>
+      <p>从 <code>lafan_run1_subject5</code> 的第 0 帧跑到末帧，共 11889 个控制步。64 个环境各算第一次尝试，摔倒或提前超时就记为失败。</p>
+    </header>
+    <div class="spread">
+      <figure class="plate">
+        <div class="plate-inner grid-paper">
+          <div class="fig-head"><span>第 5000 次迭代的整段评估</span><span class="fig-no">seed = 0</span></div>
+          <div class="eval-head">
+            <svg class="waffle" viewBox="0 0 128 128" role="img" aria-labelledby="score-title">
+              <title id="score-title">64 格代表 64 次尝试，53 格实心为成功，11 格斜纹为失败，按结果归类展示</title>
+              <defs>
+                <pattern id="stripes" width="5" height="5" patternUnits="userSpaceOnUse"><rect width="5" height="5" fill="#f5d9be"/><path d="M-1 1 1 -1 M0 5 5 0 M4 6 6 4" stroke="#994326" stroke-width="1.5"/></pattern>
+                <pattern id="fail" width="16" height="16" patternUnits="userSpaceOnUse"><rect x="1" y="1" width="13" height="13" fill="url(#stripes)" stroke="#93492c"/></pattern>
+                <pattern id="pass" width="16" height="16" patternUnits="userSpaceOnUse"><rect x="0" y="0" width="16" height="16" fill="#e0e9d7"/><rect x="1" y="1" width="13" height="13" fill="#28553e"/></pattern>
+              </defs>
+              <rect width="128" height="128" fill="url(#fail)"/><path d="M0 0H128V96H80V112H0Z" fill="url(#pass)"/>
+            </svg>
+            <div><div class="score">53<small> / 64</small></div><p class="score-label"><b>82.81%</b> 完整成功<br>实心为成功，斜纹为失败</p></div>
+          </div>
+          <table class="comparison">
+            <thead><tr><th scope="col">迭代</th><th scope="col">完整成功</th><th scope="col">平均存活</th><th scope="col">部位位置误差</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">1000</th><td>0 / 64</td><td>6.60 秒</td><td>14.43 cm</td></tr>
+              <tr><th scope="row">2000</th><td>0 / 64</td><td>38.45 秒</td><td>11.30 cm</td></tr>
+              <tr><th scope="row">5000</th><td>53 / 64</td><td>213.33 秒</td><td>4.14 cm</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <figcaption class="fig-caption">位置误差取 14 个跟踪部位重锚定后的平均距离，统计覆盖各次尝试的存活步。前两次评估都未跑完全程，平均存活时间显示了差别。</figcaption>
+      </figure>
+      <aside class="sidebar">
+        <section class="note tint"><h2>T7 仍待参考策略对照</h2><p>这是截至 2026-11-18 录入实测笔记的阶段结果。效果验收还要让参考策略按同一动作、同一协议评测，比较完整成功率和平均误差，再由用户确认阈值。</p></section>
+        <details class="note extra-note" open><summary><h2>4096 环境的显存验过吗？</h2></summary><p>T0–T6 已通过。T6 在 RTX 5060 Ti 上以 <strong>2048 环境</strong>跑 50 次迭代，整卡采样峰值 4610 MiB。新默认 <strong>4096 环境</strong>的完整训练峰值待测。</p></details>
+        <details class="note extra-note" open><summary><h2>导出和回放到哪一步？</h2></summary><p>T9 的 Mac CPU 虚影回放已验。T8 的 ONNX 已过 CPU 数值自检，仍需用 T7 合格策略完成整段 sim2sim 并保持不摔倒。</p></details>
+      </aside>
+    </div>
+    <footer class="sources">
+      <strong>对照阅读</strong>
+      <a href="../../NOTES.md">阶段评估原表</a>
+      <a href="../../../tools/evaluate_tracking.py">整段评估脚本</a>
+      <a href="../../SPEC.md">验收条件</a>
+    </footer>
+  </main>
+  <nav class="page-nav" aria-label="海报导航">
+    <div><a href="index.html">图册目录</a><a href="../07-evaluation.png">海报原图 ↗</a></div>
+    <div><a href="06-runtime.html" rel="prev">← 上一张</a><a href="index.html" rel="next">回到图册目录 ↑</a></div>
+  </nav>
+</body>
+</html>
